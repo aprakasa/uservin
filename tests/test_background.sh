@@ -23,7 +23,7 @@ test_get_run_id() {
     local run_id
     run_id=$(get_run_id)
     assert_true "[[ -n \"\$run_id\" ]]" "get_run_id should return non-empty value"
-    assert_true "[[ \"\$run_id\" =~ ^[0-9]{8}-[0-9]{6}\$ ]]" "get_run_id should match YYYYMMDD-HHMMSS format"
+    assert_true "[[ \"\$run_id\" =~ ^[0-9]{8}-[0-9]{6}-[0-9]+$ ]]" "get_run_id should match YYYYMMDD-HHMMSS-PID format"
 }
 
 test_set_run_paths() {
@@ -39,6 +39,26 @@ test_set_run_paths() {
     assert_true "[[ \"\$PID_FILE\" == *.pid ]]" "PID_FILE should have .pid extension"
 }
 
+test_set_run_paths_preserves_existing() {
+    local saved_log="$LOG_FILE"
+    local saved_status="$STATUS_FILE"
+    local saved_pid="$PID_FILE"
+
+    LOG_FILE="/tmp/existing.log"
+    STATUS_FILE="/tmp/existing.json"
+    PID_FILE="/tmp/existing.pid"
+
+    set_run_paths
+
+    assert_equals "/tmp/existing.log" "$LOG_FILE" "LOG_FILE should be preserved"
+    assert_equals "/tmp/existing.json" "$STATUS_FILE" "STATUS_FILE should be preserved"
+    assert_equals "/tmp/existing.pid" "$PID_FILE" "PID_FILE should be preserved"
+
+    LOG_FILE="$saved_log"
+    STATUS_FILE="$saved_status"
+    PID_FILE="$saved_pid"
+}
+
 test_update_status() {
     local tmp_dir
     tmp_dir=$(mktemp -d)
@@ -50,6 +70,19 @@ test_update_status() {
     assert_contains "$content" '"status": "testing"' "status file should contain status"
     assert_contains "$content" '"message": "test message"' "status file should contain message"
     assert_contains "$content" '"pid":' "status file should contain pid"
+    rm -rf "$tmp_dir"
+}
+
+test_update_status_escapes_json() {
+    local tmp_dir
+    tmp_dir=$(mktemp -d)
+    STATUS_FILE="$tmp_dir/test-status.json"
+    update_status "error" "path /tmp/test \"bad\" and \\backslash"
+    assert_true "[[ -f \"\$STATUS_FILE\" ]]" "status file should be created"
+    local content
+    content=$(cat "$STATUS_FILE")
+    assert_contains "$content" '"status": "error"' "status should be set"
+    assert_false "echo \"\$content\" | grep -q '\"bad\"'" "quotes should be escaped"
     rm -rf "$tmp_dir"
 }
 
@@ -73,14 +106,12 @@ test_should_auto_background_no_background() {
     NO_BACKGROUND="$saved_no_background"
 }
 
-test_should_auto_background_not_interactive() {
+test_should_auto_background_flags() {
     local saved_dry_run="$DRY_RUN"
     local saved_no_background="$NO_BACKGROUND"
     DRY_RUN=false
     NO_BACKGROUND=false
-    if ! is_interactive_terminal; then
-        assert_false "should_auto_background" "should not auto-background when not interactive"
-    fi
+    assert_equals "$(is_interactive_terminal && echo yes || echo no)" "$(should_auto_background && echo yes || echo no)" "should_auto_background should match is_interactive_terminal when flags are clear"
     DRY_RUN="$saved_dry_run"
     NO_BACKGROUND="$saved_no_background"
 }
