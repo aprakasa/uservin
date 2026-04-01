@@ -11,6 +11,16 @@ source "$SCRIPT_DIR/wizard.sh"
 # shellcheck source=/dev/null
 source "$SCRIPT_DIR/safety.sh"
 
+disable_ssh_socket() {
+    if systemctl list-unit-files ssh.socket &>/dev/null 2>&1; then
+        log_verbose "Detected ssh.socket (Ubuntu 24.04 socket activation)"
+        execute_cmd "systemctl stop ssh.socket" "Stopping ssh.socket"
+        execute_cmd "systemctl disable ssh.socket" "Disabling ssh.socket"
+        execute_cmd "systemctl enable ssh" "Enabling ssh.service"
+        log_verbose "Switched from ssh.socket to ssh.service"
+    fi
+}
+
 # Harden SSH configuration
 # Creates a hardened sshd_config with security best practices
 harden_ssh() {
@@ -69,7 +79,7 @@ HostKey /etc/ssh/ssh_host_ed25519_key
 # Ciphers and algorithms
 Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com,aes256-ctr,aes192-ctr,aes128-ctr
 MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com,hmac-sha2-512,hmac-sha2-256
-KexAlgorithms curve25519-sha256@libssh.org,ecdh-sha2-nistp521,ecdh-sha2-nistp384,ecdh-sha2-nistp256,diffie-hellman-group-exchange-sha256
+KexAlgorithms mlkem768x25519-sha256,curve25519-sha256@libssh.org,ecdh-sha2-nistp521,ecdh-sha2-nistp384,ecdh-sha2-nistp256,diffie-hellman-group-exchange-sha256
 
 # Authentication settings
 PasswordAuthentication no
@@ -116,17 +126,33 @@ EOF
     
     log_success "SSH configuration test passed"
     
-    # Restart SSH service
-    log_verbose "Restarting SSH service..."
+    disable_ssh_socket
+    
+    # Reload SSH service (preserves existing sessions)
+    log_verbose "Reloading SSH service..."
     if cmd_exists systemctl; then
-        if systemctl restart sshd 2>/dev/null || systemctl restart ssh; then
-            log_success "SSH service restarted successfully"
+        local ssh_service=""
+        if systemctl list-unit-files ssh.service &>/dev/null 2>&1; then
+            ssh_service="ssh"
+        elif systemctl list-unit-files sshd.service &>/dev/null 2>&1; then
+            ssh_service="sshd"
+        fi
+        
+        if [[ -n "$ssh_service" ]]; then
+            if systemctl reload "$ssh_service" 2>/dev/null; then
+                log_success "SSH service reloaded (existing sessions preserved)"
+            elif systemctl restart "$ssh_service" 2>/dev/null; then
+                log_warn "SSH service restarted (existing sessions may be dropped)"
+            else
+                log_error "Failed to reload/restart SSH service"
+                return 1
+            fi
         else
-            log_error "Failed to restart SSH service"
+            log_error "Could not determine SSH service name"
             return 1
         fi
     else
-        log_warn "systemctl not available - cannot restart SSH service"
+        log_warn "systemctl not available - cannot reload SSH service"
         return 1
     fi
     

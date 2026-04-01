@@ -90,6 +90,18 @@ test_configure_fail2ban_function_exists() {
     teardown
 }
 
+test_disable_ssh_socket_function_exists() {
+    setup
+    
+    if type disable_ssh_socket &>/dev/null; then
+        assert_true "true" "disable_ssh_socket function exists"
+    else
+        assert_true "false" "disable_ssh_socket function should exist"
+    fi
+    
+    teardown
+}
+
 # Test: configure_auto_updates() function exists and is defined
 test_configure_auto_updates_function_exists() {
     setup
