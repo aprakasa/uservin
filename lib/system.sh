@@ -81,9 +81,84 @@ install_packages() {
     log_verbose "Installing packages: $all_packages"
     if execute_cmd "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq $all_packages" "Installing essential packages"; then
         log_success "Essential packages installed successfully"
+        
+        # Upgrade OpenSSH to version with post-quantum support
+        upgrade_openssh
+        
         return 0
     else
         log_error "Failed to install some packages"
+        return 1
+    fi
+}
+
+# upgrade_openssh() - Upgrade OpenSSH to version 9.7+ with post-quantum support
+# Checks current version and upgrades if necessary
+upgrade_openssh() {
+    log_info "Checking OpenSSH version..."
+    
+    # Get current OpenSSH version
+    local current_version
+    current_version=$(ssh -V 2>&1 | grep -oP 'OpenSSH_\K[0-9]+\.[0-9]+' || echo "0.0")
+    
+    log_info "Current OpenSSH version: $current_version"
+    
+    # Check if version is >= 9.7
+    if [[ "$(printf '%s\n' "$current_version" "9.7" | sort -V | head -n1)" = "9.7" ]]; then
+        log_success "OpenSSH $current_version already has post-quantum support"
+        return 0
+    fi
+    
+    log_info "Upgrading OpenSSH to version 9.7+ for post-quantum cryptography support..."
+    print_header "OpenSSH Upgrade"
+    
+    # Backup SSH configuration
+    if [[ -f /etc/ssh/sshd_config ]]; then
+        backup_file /etc/ssh/sshd_config
+    fi
+    
+    # Install prerequisites
+    execute_cmd "apt-get install -y -qq software-properties-common" "Installing prerequisites"
+    
+    # Add PPA for newer OpenSSH on Ubuntu 24.04
+    # Using the official Ubuntu backports or a trusted PPA
+    log_verbose "Adding PPA for OpenSSH updates..."
+    
+    # Try to add PPA (this may fail on some systems, which is okay)
+    if execute_cmd "add-apt-repository -y ppa:openssh/ppa 2>/dev/null || true" "Adding OpenSSH PPA"; then
+        execute_cmd "apt-get update -qq" "Updating package lists"
+    else
+        log_warn "Could not add OpenSSH PPA, trying standard repository..."
+    fi
+    
+    # Install/upgrade OpenSSH
+    if execute_cmd "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq openssh-server openssh-client" "Upgrading OpenSSH"; then
+        # Get new version
+        local new_version
+        new_version=$(ssh -V 2>&1 | grep -oP 'OpenSSH_\K[0-9]+\.[0-9]+' || echo "unknown")
+        
+        log_success "OpenSSH upgraded to version $new_version"
+        
+        # Restart SSH service to apply changes
+        log_info "Restarting SSH service..."
+        if execute_cmd "systemctl restart sshd || systemctl restart ssh" "Restarting SSH service"; then
+            log_success "SSH service restarted successfully"
+        else
+            log_warn "Could not restart SSH service automatically"
+        fi
+        
+        # Note about post-quantum algorithms
+        if [[ "$(printf '%s\n' "$new_version" "9.7" | sort -V | head -n1)" = "9.7" ]]; then
+            log_info "OpenSSH now supports post-quantum key exchange algorithms"
+        else
+            log_warn "OpenSSH version $new_version may not fully support all post-quantum algorithms"
+            log_info "Post-quantum support requires OpenSSH 9.7+. Ubuntu will receive this through normal updates."
+        fi
+        
+        return 0
+    else
+        log_error "Failed to upgrade OpenSSH"
+        log_info "Ubuntu will provide OpenSSH updates through the standard update process"
         return 1
     fi
 }
@@ -137,8 +212,12 @@ set_hostname() {
         return 1
     fi
     
-    if [[ ! "$hostname" =~ ^[a-zA-Z0-9][-a-zA-Z0-9]*$ ]]; then
+    # Validate hostname - allow simple hostnames and FQDNs
+    # Simple hostname: alphanum + hyphens (e.g., "myserver")
+    # FQDN: hostname + dots + domain (e.g., "srv.stackengineer.dev")
+    if [[ ! "$hostname" =~ ^[a-zA-Z0-9]([-a-zA-Z0-9]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([-a-zA-Z0-9]*[a-zA-Z0-9])?)*$ ]]; then
         log_error "Invalid hostname format: $hostname"
+        log_error "Hostname must start/end with alphanumeric, can contain hyphens and dots"
         return 1
     fi
     
