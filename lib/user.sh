@@ -109,6 +109,15 @@ setup_ssh_keys() {
         return 0
     fi
     
+    log_info "Setting up SSH keys for user: $username"
+    
+    # In dry-run mode, skip user existence check
+    if [[ "$DRY_RUN" == "true" ]]; then
+        echo -e "${YELLOW}[DRY-RUN]${NC} Would create .ssh directory for user '$username'"
+        echo -e "${YELLOW}[DRY-RUN]${NC} Would add SSH key to authorized_keys"
+        return 0
+    fi
+    
     # Check if user exists
     if ! id "$username" &> /dev/null; then
         log_error "User '$username' does not exist. Create user first."
@@ -126,14 +135,6 @@ setup_ssh_keys() {
     
     local ssh_dir="$home_dir/.ssh"
     local auth_keys="$ssh_dir/authorized_keys"
-    
-    log_info "Setting up SSH keys for user: $username"
-    
-    if [[ "$DRY_RUN" == "true" ]]; then
-        echo -e "${YELLOW}[DRY-RUN]${NC} Would create .ssh directory at $ssh_dir"
-        echo -e "${YELLOW}[DRY-RUN]${NC} Would add SSH key to $auth_keys"
-        return 0
-    fi
     
     # Create .ssh directory if it doesn't exist
     if [[ ! -d "$ssh_dir" ]]; then

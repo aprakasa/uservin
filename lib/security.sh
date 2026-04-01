@@ -15,23 +15,33 @@ source "$SCRIPT_DIR/safety.sh"
 # Creates a hardened sshd_config with security best practices
 harden_ssh() {
     log_info "Configuring SSH hardening..."
-    
+
     # Get configuration values
     local ssh_port username
     ssh_port=$(get_config "ssh_port")
     username=$(get_config "username")
-    
+
     # Validate configuration
     if [[ -z "$ssh_port" ]]; then
         log_error "SSH port not configured"
         return 1
     fi
-    
+
     if [[ -z "$username" ]]; then
         log_error "Username not configured"
         return 1
     fi
-    
+
+    # In dry-run mode, just simulate SSH hardening
+    if [[ "$DRY_RUN" == "true" ]]; then
+        echo -e "${YELLOW}[DRY-RUN]${NC} Would configure SSH hardening"
+        echo -e "${YELLOW}[DRY-RUN]${NC} Would set SSH port to $ssh_port"
+        echo -e "${YELLOW}[DRY-RUN]${NC} Would disable root login"
+        echo -e "${YELLOW}[DRY-RUN]${NC} Would disable password authentication"
+        echo -e "${YELLOW}[DRY-RUN]${NC} Would restart SSH service"
+        return 0
+    fi
+
     local sshd_config="/etc/ssh/sshd_config"
     
     # Backup original configuration
@@ -146,6 +156,14 @@ configure_ufw() {
         return 1
     fi
     
+    # In dry-run mode, just simulate UFW configuration
+    if [[ "$DRY_RUN" == "true" ]]; then
+        echo -e "${YELLOW}[DRY-RUN]${NC} Would configure UFW firewall"
+        echo -e "${YELLOW}[DRY-RUN]${NC} Would allow SSH port $ssh_port"
+        echo -e "${YELLOW}[DRY-RUN]${NC} Would enable UFW with default deny incoming"
+        return 0
+    fi
+    
     # Check if UFW is installed
     if ! cmd_exists ufw; then
         log_error "UFW is not installed"
@@ -190,22 +208,30 @@ configure_ufw() {
 # Sets up intrusion prevention for SSH
 configure_fail2ban() {
     log_info "Configuring Fail2ban..."
-    
+
     # Get SSH port
     local ssh_port
     ssh_port=$(get_config "ssh_port")
-    
+
     if [[ -z "$ssh_port" ]]; then
         log_error "SSH port not configured"
         return 1
     fi
-    
+
+    # In dry-run mode, just simulate fail2ban configuration
+    if [[ "$DRY_RUN" == "true" ]]; then
+        echo -e "${YELLOW}[DRY-RUN]${NC} Would configure Fail2ban"
+        echo -e "${YELLOW}[DRY-RUN]${NC} Would set SSH port to $ssh_port"
+        echo -e "${YELLOW}[DRY-RUN]${NC} Would create /etc/fail2ban/jail.local"
+        return 0
+    fi
+
     # Check if fail2ban is installed
     if ! cmd_exists fail2ban-server; then
         log_error "Fail2ban is not installed"
         return 1
     fi
-    
+
     local jail_local="/etc/fail2ban/jail.local"
     
     # Backup existing jail.local if it exists
