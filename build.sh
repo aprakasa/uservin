@@ -45,6 +45,9 @@ LOG_LEVEL=1
 # Dry run mode (true/false)
 DRY_RUN=false
 
+# Background execution flag
+NO_BACKGROUND=false
+
 HEADER
 
 # Function to process a library file - remove shebangs and source statements
@@ -133,6 +136,7 @@ echo "" >> "$TEMP_FILE"
 # Order matters: utils first, then others
 lib_files=(
     "utils.sh"
+    "background.sh"
     "safety.sh"
     "wizard.sh"
     "system.sh"
@@ -177,6 +181,8 @@ Options:
     --quiet, -q      Minimal output (errors only)
     --verbose, -v    Detailed output
     --config FILE    Use custom configuration file
+    --status         Show status of running or last uservin process
+    --no-background  Run in foreground even in interactive terminal
     --help, -h       Show this help message
     --version        Show version information
 
@@ -188,6 +194,11 @@ Examples:
     $(basename "$0")                    # Run with default settings
     $(basename "$0") --dry-run          # Preview changes
     $(basename "$0") --config my.cfg    # Use custom config
+
+Background Execution:
+  When run interactively, uservin automatically backgrounds itself.
+  Progress is logged to /var/log/uservin/ and can be monitored with:
+    tail -f /var/log/uservin/uservin-*.log
 
 One-liner install:
     wget -qO- https://raw.githubusercontent.com/aprakasa/uservin/main/uservin.sh | sudo bash
@@ -221,6 +232,14 @@ parse_args() {
                     exit 1
                 fi
                 ;;
+            --status)
+                show_status
+                exit $?
+                ;;
+            --no-background)
+                NO_BACKGROUND=true
+                shift
+                ;;
             --help|-h)
                 show_help
                 exit 0
@@ -245,6 +264,8 @@ main() {
     
     # Initialize logging
     init_logging
+    
+    setup_background_execution "$@"
     
     # Show banner
     print_header "uservin - Ubuntu Server Initialization"
