@@ -34,7 +34,7 @@ cat > "$TEMP_FILE" << 'HEADER'
 set -euo pipefail
 
 # Script version
-readonly VERSION="0.1.0"
+readonly SCRIPT_VERSION="0.1.0"
 
 # Configuration file path (can be overridden with --config)
 CONFIG_FILE=""
@@ -168,7 +168,7 @@ cat >> "$TEMP_FILE" << 'MAIN'
 # Show help message
 show_help() {
     cat << EOF
-uservin - Ubuntu Server Initialization Tool v${VERSION}
+uservin - Ubuntu Server Initialization Tool v${SCRIPT_VERSION}
 
 Usage: $(basename "$0") [OPTIONS]
 
@@ -226,7 +226,7 @@ parse_args() {
                 exit 0
                 ;;
             --version)
-                echo "uservin version $VERSION"
+                echo "uservin version $SCRIPT_VERSION"
                 exit 0
                 ;;
             *)
@@ -282,14 +282,24 @@ main() {
     done
     
     # Run preflight checks
-    if ! run_preflight; then
+    if ! preflight_checks; then
         log_error "Preflight checks failed. Aborting."
         exit 1
     fi
     
-    # Show welcome and run wizard
+    # Show welcome
     show_welcome
-    run_wizard
+    
+    # Run wizard or load config
+    if [[ -n "$CONFIG_FILE" ]]; then
+        log_info "Loading configuration from: $CONFIG_FILE"
+        if ! load_config_file; then
+            log_error "Failed to load configuration file"
+            exit 1
+        fi
+    else
+        run_wizard
+    fi
     
     # Execute the setup
     if ! execute_setup; then
