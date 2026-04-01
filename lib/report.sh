@@ -5,6 +5,7 @@
 
 SCRIPT_DIR="$(dirname "${BASH_SOURCE[0]}")"
 source "$SCRIPT_DIR/utils.sh"
+source "$SCRIPT_DIR/background.sh"
 source "$SCRIPT_DIR/wizard.sh"
 source "$SCRIPT_DIR/safety.sh"
 source "$SCRIPT_DIR/system.sh"
@@ -78,6 +79,9 @@ show_completion() {
     echo "  Backup Location: /root/uservin-backup-*"
     echo "  Log File: /root/uservin-*.log"
     echo "  Restore Command: /root/restore-uservin.sh"
+    if [[ -n "${LOG_FILE:-}" ]] && [[ -f "${LOG_FILE:-}" ]]; then
+        echo "  Full Setup Log: $LOG_FILE"
+    fi
     echo ""
     
     # Show next steps
@@ -121,6 +125,7 @@ te_setup() {
     log_info "Starting server setup..."
     
     # Initialize backup system
+    update_status "running" "Initializing backup system..."
     log_info "Initializing backup system..."
     if ! init_backup; then
         log_error "Failed to initialize backup system"
@@ -128,18 +133,22 @@ te_setup() {
     fi
     
     # Run system updates - rollback on failure
+    update_status "running" "Running system updates..."
     log_info "Running system updates..."
     if ! update_system; then
         log_error "Failed to update system"
+        update_status "failed" "System updates failed"
         set_rollback_needed
         critical_failed=true
     fi
     
     # Install packages - rollback on failure
     if [[ "$critical_failed" == "false" ]]; then
+        update_status "running" "Installing packages..."
         log_info "Installing packages..."
         if ! install_packages; then
             log_error "Failed to install packages"
+            update_status "failed" "Package installation failed"
             set_rollback_needed
             critical_failed=true
         fi
@@ -147,9 +156,11 @@ te_setup() {
     
     # Set hostname - rollback on failure
     if [[ "$critical_failed" == "false" ]]; then
+        update_status "running" "Configuring hostname..."
         log_info "Setting hostname..."
         if ! set_hostname; then
             log_error "Failed to set hostname"
+            update_status "failed" "Hostname configuration failed"
             set_rollback_needed
             critical_failed=true
         fi
@@ -157,9 +168,11 @@ te_setup() {
     
     # Set timezone - rollback on failure
     if [[ "$critical_failed" == "false" ]]; then
+        update_status "running" "Configuring timezone..."
         log_info "Setting timezone..."
         if ! set_timezone; then
             log_error "Failed to set timezone"
+            update_status "failed" "Timezone configuration failed"
             set_rollback_needed
             critical_failed=true
         fi
@@ -167,9 +180,11 @@ te_setup() {
     
     # Create admin user - rollback on failure
     if [[ "$critical_failed" == "false" ]]; then
+        update_status "running" "Creating admin user..."
         log_info "Creating admin user..."
         if ! create_admin_user; then
             log_error "Failed to create admin user"
+            update_status "failed" "Admin user creation failed"
             set_rollback_needed
             critical_failed=true
         fi
@@ -177,9 +192,11 @@ te_setup() {
     
     # Setup SSH keys - rollback on failure
     if [[ "$critical_failed" == "false" ]]; then
+        update_status "running" "Setting up SSH keys..."
         log_info "Setting up SSH keys..."
         if ! setup_ssh_keys; then
             log_error "Failed to setup SSH keys"
+            update_status "failed" "SSH key setup failed"
             set_rollback_needed
             critical_failed=true
         fi
@@ -187,9 +204,11 @@ te_setup() {
     
     # Configure UFW - rollback on failure
     if [[ "$critical_failed" == "false" ]]; then
+        update_status "running" "Configuring firewall..."
         log_info "Configuring firewall..."
         if ! configure_ufw; then
             log_error "Failed to configure UFW"
+            update_status "failed" "Firewall configuration failed"
             set_rollback_needed
             critical_failed=true
         fi
@@ -197,9 +216,11 @@ te_setup() {
     
     # Configure Fail2ban - rollback on failure
     if [[ "$critical_failed" == "false" ]]; then
+        update_status "running" "Configuring fail2ban..."
         log_info "Configuring fail2ban..."
         if ! configure_fail2ban; then
             log_error "Failed to configure fail2ban"
+            update_status "failed" "Fail2ban configuration failed"
             set_rollback_needed
             critical_failed=true
         fi
@@ -207,9 +228,11 @@ te_setup() {
     
     # Harden SSH - rollback on failure
     if [[ "$critical_failed" == "false" ]]; then
+        update_status "running" "Hardening SSH..."
         log_info "Hardening SSH..."
         if ! harden_ssh; then
             log_error "Failed to harden SSH"
+            update_status "failed" "SSH hardening failed"
             set_rollback_needed
             critical_failed=true
         fi
@@ -217,9 +240,11 @@ te_setup() {
     
     # Optimize performance - rollback on failure
     if [[ "$critical_failed" == "false" ]]; then
+        update_status "running" "Optimizing performance..."
         log_info "Optimizing performance..."
         if ! optimize_performance; then
             log_error "Failed to optimize performance"
+            update_status "failed" "Performance optimization failed"
             set_rollback_needed
             critical_failed=true
         fi
@@ -227,6 +252,7 @@ te_setup() {
     
     # Configure swap - non-critical
     if [[ "$critical_failed" == "false" ]]; then
+        update_status "running" "Configuring swap..."
         log_info "Configuring swap..."
         if ! configure_swap; then
             log_warn "Failed to configure swap (non-critical)"
@@ -235,6 +261,7 @@ te_setup() {
     
     # Configure zram - non-critical
     if [[ "$critical_failed" == "false" ]]; then
+        update_status "running" "Configuring zram..."
         log_info "Configuring zram..."
         if ! configure_zram; then
             log_warn "Failed to configure zram (non-critical)"
@@ -246,6 +273,7 @@ te_setup() {
         local auto_updates
         auto_updates=$(get_config "auto_updates")
         if [[ "$auto_updates" == "true" ]]; then
+            update_status "running" "Configuring auto updates..."
             log_info "Configuring auto updates..."
             if ! configure_auto_updates; then
                 log_warn "Failed to configure auto updates (non-critical)"
@@ -264,10 +292,12 @@ te_setup() {
     # Check if rollback is needed
     if [[ "$critical_failed" == "true" ]]; then
         log_error "Critical failures occurred during setup"
+        update_status "failed" "Critical failures occurred during setup"
         check_rollback
         return 1
     fi
     
+    update_status "completed" "Server setup completed successfully"
     log_info "Server setup completed successfully"
     return 0
 }
