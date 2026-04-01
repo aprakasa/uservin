@@ -119,7 +119,7 @@ EOF
     # Restart SSH service
     log_verbose "Restarting SSH service..."
     if cmd_exists systemctl; then
-        if systemctl restart sshd; then
+        if systemctl restart sshd 2>/dev/null || systemctl restart ssh; then
             log_success "SSH service restarted successfully"
         else
             log_error "Failed to restart SSH service"

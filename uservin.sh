@@ -288,7 +288,7 @@ get_system_specs() {
 LOG_FILE="${LOG_FILE:-}"
 STATUS_FILE="${STATUS_FILE:-}"
 PID_FILE="${PID_FILE:-}"
-NO_BACKGROUND=false
+NO_BACKGROUND="${NO_BACKGROUND:-false}"
 
 is_interactive_terminal() {
     [[ -t 0 ]] && [[ -t 1 ]] && [[ -t 2 ]]
@@ -2598,13 +2598,12 @@ parse_args() {
 
 # Main function
 main() {
-    # Parse command line arguments
+    local ORIGINAL_ARGS=("$@")
     parse_args "$@"
     
-    # Initialize logging
     init_logging
     
-    setup_background_execution "$@"
+    setup_background_execution "${ORIGINAL_ARGS[@]}"
     
     # Show banner
     print_header "uservin - Ubuntu Server Initialization"

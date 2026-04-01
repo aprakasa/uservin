@@ -7,7 +7,7 @@ fi
 LOG_FILE="${LOG_FILE:-}"
 STATUS_FILE="${STATUS_FILE:-}"
 PID_FILE="${PID_FILE:-}"
-NO_BACKGROUND=false
+NO_BACKGROUND="${NO_BACKGROUND:-false}"
 
 is_interactive_terminal() {
     [[ -t 0 ]] && [[ -t 1 ]] && [[ -t 2 ]]
