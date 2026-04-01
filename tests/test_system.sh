@@ -48,3 +48,27 @@ test_set_hostname_function_exists() {
         assert_true "false" "set_hostname function should exist"
     fi
 }
+
+test_upgrade_openssh_function_exists() {
+    if type upgrade_openssh &>/dev/null; then
+        assert_true "true" "upgrade_openssh function should exist"
+    else
+        assert_true "false" "upgrade_openssh function should exist"
+    fi
+}
+
+test_compile_openssh_from_source_function_exists() {
+    if type compile_openssh_from_source &>/dev/null; then
+        assert_true "true" "compile_openssh_from_source function should exist"
+    else
+        assert_true "false" "compile_openssh_from_source function should exist"
+    fi
+}
+
+test_install_openssh_binaries_function_exists() {
+    if type install_openssh_binaries &>/dev/null; then
+        assert_true "true" "install_openssh_binaries function should exist"
+    else
+        assert_true "false" "install_openssh_binaries function should exist"
+    fi
+}
