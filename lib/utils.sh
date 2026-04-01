@@ -242,7 +242,7 @@ get_system_specs() {
     # Disk space
     local disk_gb
     disk_gb=$(df -BG / | tail -1 | awk '{print $4}' | tr -d 'G')
-    specs+"Disk: ${disk_gb}GB available"
+    specs+="Disk: ${disk_gb}GB available"
     
     echo -e "$specs"
 }
