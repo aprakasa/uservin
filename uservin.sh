@@ -9,7 +9,7 @@
 set -euo pipefail
 
 # Script version
-readonly VERSION="0.1.0"
+readonly SCRIPT_VERSION="0.1.0"
 
 # Configuration file path (can be overridden with --config)
 CONFIG_FILE=""
@@ -271,7 +271,7 @@ get_system_specs() {
     # Disk space
     local disk_gb
     disk_gb=$(df -BG / | tail -1 | awk '{print $4}' | tr -d 'G')
-    specs+"Disk: ${disk_gb}GB available"
+    specs+="Disk: ${disk_gb}GB available"
     
     echo -e "$specs"
 }
@@ -818,6 +818,114 @@ run_wizard() {
     fi
 }
 
+# Load configuration from INI file
+# Arguments:
+#   CONFIG_FILE - Global variable with path to config file
+# Returns: 0 on success, 1 on failure
+load_config_file() {
+    if [[ ! -f "$CONFIG_FILE" ]]; then
+        log_error "Configuration file not found: $CONFIG_FILE"
+        return 1
+    fi
+    
+    log_info "Parsing configuration file: $CONFIG_FILE"
+    
+    # Parse the INI file
+    local section=""
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        # Skip comments and empty lines
+        [[ "$line" =~ ^[[:space:]]*# ]] && continue
+        [[ "$line" =~ ^[[:space:]]*$ ]] && continue
+        
+        # Check for section header
+        if [[ "$line" =~ ^\[([^]]+)\]$ ]]; then
+            section="${BASH_REMATCH[1]}"
+            continue
+        fi
+        
+        # Parse key=value pairs
+        if [[ "$line" =~ ^[[:space:]]*([^=]+)[[:space:]]*=[[:space:]]*(.*)$ ]]; then
+            local key="${BASH_REMATCH[1]}"
+            local value="${BASH_REMATCH[2]}"
+            
+            # Trim whitespace and remove trailing newlines
+            key=$(echo -n "$key" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            value=$(echo -n "$value" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            
+            # Map configuration values
+            case "$section:$key" in
+                "system:hostname")
+                    CONFIG_HOSTNAME="$value"
+                    log_info "  Hostname: $value"
+                    ;;
+                "system:timezone")
+                    CONFIG_TIMEZONE="$value"
+                    log_info "  Timezone: $value"
+                    ;;
+                "user:username")
+                    CONFIG_USERNAME="$value"
+                    log_info "  Username: $value"
+                    ;;
+                "user:ssh_key")
+                    CONFIG_SSH_KEY="$value"
+                    log_info "  SSH key configured"
+                    ;;
+                "ssh:port")
+                    CONFIG_SSH_PORT="$value"
+                    log_info "  SSH Port: $value"
+                    ;;
+                "security:enable_ufw")
+                    [[ "$value" == "true" ]] && log_info "  UFW: enabled"
+                    ;;
+                "security:enable_fail2ban")
+                    [[ "$value" == "true" ]] && log_info "  Fail2ban: enabled"
+                    ;;
+                "updates:auto_updates")
+                    CONFIG_ENABLE_AUTO_UPDATES="$value"
+                    log_info "  Auto updates: $value"
+                    ;;
+                "performance:swap_size")
+                    CONFIG_ENABLE_SWAP="true"
+                    log_info "  Swap: enabled"
+                    ;;
+                "performance:enable_zram")
+                    CONFIG_ENABLE_ZRAM="$value"
+                    log_info "  Zram: $value"
+                    ;;
+                "performance:enable_bbr")
+                    [[ "$value" == "true" ]] && log_info "  BBR: enabled"
+                    ;;
+            esac
+        fi
+    done < "$CONFIG_FILE"
+    
+    # Validate required fields
+    if [[ -z "$CONFIG_HOSTNAME" ]]; then
+        log_error "Missing required configuration: system.hostname"
+        return 1
+    fi
+    
+    if [[ -z "$CONFIG_USERNAME" ]]; then
+        log_error "Missing required configuration: user.username"
+        return 1
+    fi
+    
+    if [[ -z "$CONFIG_SSH_KEY" ]]; then
+        log_error "Missing required configuration: user.ssh_key"
+        return 1
+    fi
+    
+    # Set defaults for optional fields
+    [[ -z "$CONFIG_TIMEZONE" ]] && CONFIG_TIMEZONE="UTC"
+    [[ -z "$CONFIG_SSH_PORT" ]] && CONFIG_SSH_PORT="22"
+    [[ -z "$CONFIG_ENABLE_AUTO_UPDATES" ]] && CONFIG_ENABLE_AUTO_UPDATES="true"
+    [[ -z "$CONFIG_ENABLE_ZRAM" ]] && CONFIG_ENABLE_ZRAM="true"
+    [[ -z "$CONFIG_ENABLE_SWAP" ]] && CONFIG_ENABLE_SWAP="true"
+    
+    log_success "Configuration loaded successfully"
+    return 0
+}
+
 # =========================================================
 # Library: system.sh
 # =========================================================
@@ -898,9 +1006,84 @@ install_packages() {
     log_verbose "Installing packages: $all_packages"
     if execute_cmd "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq $all_packages" "Installing essential packages"; then
         log_success "Essential packages installed successfully"
+        
+        # Upgrade OpenSSH to version with post-quantum support
+        upgrade_openssh
+        
         return 0
     else
         log_error "Failed to install some packages"
+        return 1
+    fi
+}
+
+# upgrade_openssh() - Upgrade OpenSSH to version 9.7+ with post-quantum support
+# Checks current version and upgrades if necessary
+upgrade_openssh() {
+    log_info "Checking OpenSSH version..."
+    
+    # Get current OpenSSH version
+    local current_version
+    current_version=$(ssh -V 2>&1 | grep -oP 'OpenSSH_\K[0-9]+\.[0-9]+' || echo "0.0")
+    
+    log_info "Current OpenSSH version: $current_version"
+    
+    # Check if version is >= 9.7
+    if [[ "$(printf '%s\n' "$current_version" "9.7" | sort -V | head -n1)" = "9.7" ]]; then
+        log_success "OpenSSH $current_version already has post-quantum support"
+        return 0
+    fi
+    
+    log_info "Upgrading OpenSSH to version 9.7+ for post-quantum cryptography support..."
+    print_header "OpenSSH Upgrade"
+    
+    # Backup SSH configuration
+    if [[ -f /etc/ssh/sshd_config ]]; then
+        backup_file /etc/ssh/sshd_config
+    fi
+    
+    # Install prerequisites
+    execute_cmd "apt-get install -y -qq software-properties-common" "Installing prerequisites"
+    
+    # Add PPA for newer OpenSSH on Ubuntu 24.04
+    # Using the official Ubuntu backports or a trusted PPA
+    log_verbose "Adding PPA for OpenSSH updates..."
+    
+    # Try to add PPA (this may fail on some systems, which is okay)
+    if execute_cmd "add-apt-repository -y ppa:openssh/ppa 2>/dev/null || true" "Adding OpenSSH PPA"; then
+        execute_cmd "apt-get update -qq" "Updating package lists"
+    else
+        log_warn "Could not add OpenSSH PPA, trying standard repository..."
+    fi
+    
+    # Install/upgrade OpenSSH
+    if execute_cmd "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq openssh-server openssh-client" "Upgrading OpenSSH"; then
+        # Get new version
+        local new_version
+        new_version=$(ssh -V 2>&1 | grep -oP 'OpenSSH_\K[0-9]+\.[0-9]+' || echo "unknown")
+        
+        log_success "OpenSSH upgraded to version $new_version"
+        
+        # Restart SSH service to apply changes
+        log_info "Restarting SSH service..."
+        if execute_cmd "systemctl restart sshd || systemctl restart ssh" "Restarting SSH service"; then
+            log_success "SSH service restarted successfully"
+        else
+            log_warn "Could not restart SSH service automatically"
+        fi
+        
+        # Note about post-quantum algorithms
+        if [[ "$(printf '%s\n' "$new_version" "9.7" | sort -V | head -n1)" = "9.7" ]]; then
+            log_info "OpenSSH now supports post-quantum key exchange algorithms"
+        else
+            log_warn "OpenSSH version $new_version may not fully support all post-quantum algorithms"
+            log_info "Post-quantum support requires OpenSSH 9.7+. Ubuntu will receive this through normal updates."
+        fi
+        
+        return 0
+    else
+        log_error "Failed to upgrade OpenSSH"
+        log_info "Ubuntu will provide OpenSSH updates through the standard update process"
         return 1
     fi
 }
@@ -954,8 +1137,12 @@ set_hostname() {
         return 1
     fi
     
-    if [[ ! "$hostname" =~ ^[a-zA-Z0-9][-a-zA-Z0-9]*$ ]]; then
+    # Validate hostname - allow simple hostnames and FQDNs
+    # Simple hostname: alphanum + hyphens (e.g., "myserver")
+    # FQDN: hostname + dots + domain (e.g., "srv.stackengineer.dev")
+    if [[ ! "$hostname" =~ ^[a-zA-Z0-9]([-a-zA-Z0-9]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([-a-zA-Z0-9]*[a-zA-Z0-9])?)*$ ]]; then
         log_error "Invalid hostname format: $hostname"
+        log_error "Hostname must start/end with alphanumeric, can contain hyphens and dots"
         return 1
     fi
     
@@ -1016,23 +1203,33 @@ SCRIPT_DIR="$(dirname "${BASH_SOURCE[0]}")"
 # Creates a hardened sshd_config with security best practices
 harden_ssh() {
     log_info "Configuring SSH hardening..."
-    
+
     # Get configuration values
     local ssh_port username
     ssh_port=$(get_config "ssh_port")
     username=$(get_config "username")
-    
+
     # Validate configuration
     if [[ -z "$ssh_port" ]]; then
         log_error "SSH port not configured"
         return 1
     fi
-    
+
     if [[ -z "$username" ]]; then
         log_error "Username not configured"
         return 1
     fi
-    
+
+    # In dry-run mode, just simulate SSH hardening
+    if [[ "$DRY_RUN" == "true" ]]; then
+        echo -e "${YELLOW}[DRY-RUN]${NC} Would configure SSH hardening"
+        echo -e "${YELLOW}[DRY-RUN]${NC} Would set SSH port to $ssh_port"
+        echo -e "${YELLOW}[DRY-RUN]${NC} Would disable root login"
+        echo -e "${YELLOW}[DRY-RUN]${NC} Would disable password authentication"
+        echo -e "${YELLOW}[DRY-RUN]${NC} Would restart SSH service"
+        return 0
+    fi
+
     local sshd_config="/etc/ssh/sshd_config"
     
     # Backup original configuration
@@ -1147,6 +1344,14 @@ configure_ufw() {
         return 1
     fi
     
+    # In dry-run mode, just simulate UFW configuration
+    if [[ "$DRY_RUN" == "true" ]]; then
+        echo -e "${YELLOW}[DRY-RUN]${NC} Would configure UFW firewall"
+        echo -e "${YELLOW}[DRY-RUN]${NC} Would allow SSH port $ssh_port"
+        echo -e "${YELLOW}[DRY-RUN]${NC} Would enable UFW with default deny incoming"
+        return 0
+    fi
+    
     # Check if UFW is installed
     if ! cmd_exists ufw; then
         log_error "UFW is not installed"
@@ -1191,22 +1396,30 @@ configure_ufw() {
 # Sets up intrusion prevention for SSH
 configure_fail2ban() {
     log_info "Configuring Fail2ban..."
-    
+
     # Get SSH port
     local ssh_port
     ssh_port=$(get_config "ssh_port")
-    
+
     if [[ -z "$ssh_port" ]]; then
         log_error "SSH port not configured"
         return 1
     fi
-    
+
+    # In dry-run mode, just simulate fail2ban configuration
+    if [[ "$DRY_RUN" == "true" ]]; then
+        echo -e "${YELLOW}[DRY-RUN]${NC} Would configure Fail2ban"
+        echo -e "${YELLOW}[DRY-RUN]${NC} Would set SSH port to $ssh_port"
+        echo -e "${YELLOW}[DRY-RUN]${NC} Would create /etc/fail2ban/jail.local"
+        return 0
+    fi
+
     # Check if fail2ban is installed
     if ! cmd_exists fail2ban-server; then
         log_error "Fail2ban is not installed"
         return 1
     fi
-    
+
     local jail_local="/etc/fail2ban/jail.local"
     
     # Backup existing jail.local if it exists
@@ -1497,6 +1710,15 @@ setup_ssh_keys() {
         return 0
     fi
     
+    log_info "Setting up SSH keys for user: $username"
+    
+    # In dry-run mode, skip user existence check
+    if [[ "$DRY_RUN" == "true" ]]; then
+        echo -e "${YELLOW}[DRY-RUN]${NC} Would create .ssh directory for user '$username'"
+        echo -e "${YELLOW}[DRY-RUN]${NC} Would add SSH key to authorized_keys"
+        return 0
+    fi
+    
     # Check if user exists
     if ! id "$username" &> /dev/null; then
         log_error "User '$username' does not exist. Create user first."
@@ -1514,14 +1736,6 @@ setup_ssh_keys() {
     
     local ssh_dir="$home_dir/.ssh"
     local auth_keys="$ssh_dir/authorized_keys"
-    
-    log_info "Setting up SSH keys for user: $username"
-    
-    if [[ "$DRY_RUN" == "true" ]]; then
-        echo -e "${YELLOW}[DRY-RUN]${NC} Would create .ssh directory at $ssh_dir"
-        echo -e "${YELLOW}[DRY-RUN]${NC} Would add SSH key to $auth_keys"
-        return 0
-    fi
     
     # Create .ssh directory if it doesn't exist
     if [[ ! -d "$ssh_dir" ]]; then
@@ -2117,7 +2331,7 @@ execute_setup() {
 # Show help message
 show_help() {
     cat << EOF
-uservin - Ubuntu Server Initialization Tool v${VERSION}
+uservin - Ubuntu Server Initialization Tool v${SCRIPT_VERSION}
 
 Usage: $(basename "$0") [OPTIONS]
 
@@ -2175,7 +2389,7 @@ parse_args() {
                 exit 0
                 ;;
             --version)
-                echo "uservin version $VERSION"
+                echo "uservin version $SCRIPT_VERSION"
                 exit 0
                 ;;
             *)
@@ -2231,14 +2445,24 @@ main() {
     done
     
     # Run preflight checks
-    if ! run_preflight; then
+    if ! preflight_checks; then
         log_error "Preflight checks failed. Aborting."
         exit 1
     fi
     
-    # Show welcome and run wizard
+    # Show welcome
     show_welcome
-    run_wizard
+    
+    # Run wizard or load config
+    if [[ -n "$CONFIG_FILE" ]]; then
+        log_info "Loading configuration from: $CONFIG_FILE"
+        if ! load_config_file; then
+            log_error "Failed to load configuration file"
+            exit 1
+        fi
+    else
+        run_wizard
+    fi
     
     # Execute the setup
     if ! execute_setup; then
