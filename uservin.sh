@@ -1197,75 +1197,176 @@ install_packages() {
     fi
 }
 
-# upgrade_openssh() - Upgrade OpenSSH to version 9.7+ with post-quantum support
-# Checks current version and upgrades if necessary
 upgrade_openssh() {
     log_info "Checking OpenSSH version..."
     
-    # Get current OpenSSH version
     local current_version
     current_version=$(ssh -V 2>&1 | grep -oP 'OpenSSH_\K[0-9]+\.[0-9]+' || echo "0.0")
     
     log_info "Current OpenSSH version: $current_version"
     
-    # Check if version is >= 9.7
     if [[ "$(printf '%s\n' "$current_version" "9.7" | sort -V | head -n1)" = "9.7" ]]; then
         log_success "OpenSSH $current_version already has post-quantum support"
         return 0
     fi
     
-    log_info "Upgrading OpenSSH to version 9.7+ for post-quantum cryptography support..."
-    print_header "OpenSSH Upgrade"
+    log_info "OpenSSH $current_version does not support post-quantum key exchange (requires 9.7+)"
     
-    # Backup SSH configuration
-    if [[ -f /etc/ssh/sshd_config ]]; then
-        backup_file /etc/ssh/sshd_config
-    fi
+    local available_version
+    local apt_candidate
+    apt_candidate=$(apt-cache policy openssh-server 2>/dev/null | grep Candidate | awk '{print $2}')
+    available_version=$(echo "$apt_candidate" | sed 's/^[0-9]*://' | grep -oP '^[0-9]+\.[0-9]+' || echo "0.0")
     
-    # Install prerequisites
-    execute_cmd "apt-get install -y -qq software-properties-common" "Installing prerequisites"
-    
-    # Add PPA for newer OpenSSH on Ubuntu 24.04
-    # Using the official Ubuntu backports or a trusted PPA
-    log_verbose "Adding PPA for OpenSSH updates..."
-    
-    # Try to add PPA (this may fail on some systems, which is okay)
-    if execute_cmd "add-apt-repository -y ppa:openssh/ppa 2>/dev/null || true" "Adding OpenSSH PPA"; then
-        execute_cmd "apt-get update -qq" "Updating package lists"
-    else
-        log_warn "Could not add OpenSSH PPA, trying standard repository..."
-    fi
-    
-    # Install/upgrade OpenSSH
-    if execute_cmd "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq openssh-server openssh-client" "Upgrading OpenSSH"; then
-        # Get new version
-        local new_version
-        new_version=$(ssh -V 2>&1 | grep -oP 'OpenSSH_\K[0-9]+\.[0-9]+' || echo "unknown")
+    if [[ "$(printf '%s\n' "$available_version" "$current_version" | sort -V | head -n1)" = "$available_version" ]] && [[ "$available_version" != "$current_version" ]] && [[ "$(printf '%s\n' "$available_version" "9.7" | sort -V | head -n1)" = "9.7" ]]; then
+        print_header "OpenSSH Upgrade (apt)"
+        log_info "Newer OpenSSH $available_version available in repos with PQ support, upgrading..."
         
-        log_success "OpenSSH upgraded to version $new_version"
-        
-        # Restart SSH service to apply changes
-        log_info "Restarting SSH service..."
-        if execute_cmd "systemctl restart sshd || systemctl restart ssh" "Restarting SSH service"; then
-            log_success "SSH service restarted successfully"
-        else
-            log_warn "Could not restart SSH service automatically"
+        if [[ -f /etc/ssh/sshd_config ]]; then
+            backup_file /etc/ssh/sshd_config
         fi
         
-        # Note about post-quantum algorithms
-        if [[ "$(printf '%s\n' "$new_version" "9.7" | sort -V | head -n1)" = "9.7" ]]; then
-            log_info "OpenSSH now supports post-quantum key exchange algorithms"
+        if execute_cmd "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq openssh-server openssh-client" "Upgrading OpenSSH via apt"; then
+            local new_version
+            new_version=$(ssh -V 2>&1 | grep -oP 'OpenSSH_\K[0-9]+\.[0-9]+' || echo "unknown")
+            log_success "OpenSSH upgraded to $new_version"
         else
-            log_warn "OpenSSH version $new_version may not fully support all post-quantum algorithms"
-            log_info "Post-quantum support requires OpenSSH 9.7+. Ubuntu will receive this through normal updates."
+            log_warn "Failed to upgrade OpenSSH via apt"
         fi
-        
         return 0
+    fi
+    
+    log_info "Repository doesn't have OpenSSH 9.7+, will compile from source"
+    
+    if compile_openssh_from_source; then
+        if install_openssh_binaries; then
+            local new_version
+            new_version=$(ssh -V 2>&1 | grep -oP 'OpenSSH_\K[0-9]+\.[0-9]+' || echo "unknown")
+            log_success "OpenSSH upgraded to $new_version with post-quantum support"
+            
+            if ssh -Q kex 2>/dev/null | grep -q mlkem; then
+                log_success "ML-KEM post-quantum key exchange confirmed available"
+            fi
+        else
+            log_warn "Failed to install compiled OpenSSH binaries"
+        fi
     else
-        log_error "Failed to upgrade OpenSSH"
-        log_info "Ubuntu will provide OpenSSH updates through the standard update process"
+        log_warn "Failed to compile OpenSSH from source"
+        log_info "Post-quantum support will come through Ubuntu updates when available"
+    fi
+    
+    return 0
+}
+
+compile_openssh_from_source() {
+    local openssh_version="9.9p1"
+    local tar_url="https://cdn.openbsd.org/pub/OpenBSD/OpenSSH/portable/openssh-${openssh_version}.tar.gz"
+    local build_dir
+    
+    build_dir=$(mktemp -d /tmp/openssh-build.XXXXXX)
+    
+    log_info "Compiling OpenSSH $openssh_version from source..."
+    print_header "OpenSSH Source Compile"
+    
+    log_verbose "Installing build dependencies..."
+    if ! execute_cmd "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq build-essential libssl-dev zlib1g-dev libpam0g-dev libkrb5-dev libedit-dev libselinux1-dev" "Installing build dependencies"; then
+        log_error "Failed to install build dependencies"
+        rm -rf "$build_dir"
         return 1
     fi
+    
+    log_verbose "Downloading OpenSSH $openssh_version..."
+    if ! execute_cmd "curl -fSL -o $build_dir/openssh.tar.gz $tar_url" "Downloading OpenSSH source"; then
+        log_error "Failed to download OpenSSH source"
+        rm -rf "$build_dir"
+        return 1
+    fi
+    
+    log_verbose "Extracting source..."
+    if ! execute_cmd "tar -xzf $build_dir/openssh.tar.gz -C $build_dir" "Extracting OpenSSH source"; then
+        log_error "Failed to extract OpenSSH source"
+        rm -rf "$build_dir"
+        return 1
+    fi
+    
+    local src_dir="$build_dir/openssh-${openssh_version}"
+    
+    log_verbose "Configuring OpenSSH..."
+    if ! execute_cmd "cd $src_dir && ./configure --prefix=/usr/local --with-pam --with-privsep-path=/run/sshd --with-pid-dir=/run" "Configuring OpenSSH build"; then
+        log_error "Failed to configure OpenSSH"
+        rm -rf "$build_dir"
+        return 1
+    fi
+    
+    log_verbose "Compiling OpenSSH..."
+    if ! execute_cmd "make -C $src_dir -j\$(nproc)" "Compiling OpenSSH (this may take a few minutes)"; then
+        log_error "Failed to compile OpenSSH"
+        rm -rf "$build_dir"
+        return 1
+    fi
+    
+    log_verbose "Installing to /usr/local prefix..."
+    if ! execute_cmd "make -C $src_dir install" "Installing OpenSSH to /usr/local"; then
+        log_error "Failed to install OpenSSH"
+        rm -rf "$build_dir"
+        return 1
+    fi
+    
+    rm -rf "$build_dir"
+    log_success "OpenSSH $openssh_version compiled and installed to /usr/local"
+    return 0
+}
+
+install_openssh_binaries() {
+    log_info "Installing compiled OpenSSH binaries to system paths..."
+    
+    local binaries="sshd ssh scp sftp ssh-keygen ssh-add ssh-agent ssh-keyscan"
+    for binary in $binaries; do
+        local src="/usr/local/sbin/$binary"
+        [[ ! -f "$src" ]] && src="/usr/local/bin/$binary"
+        [[ ! -f "$src" ]] && continue
+        
+        local dest="/usr/sbin/$binary"
+        [[ "$binary" != "sshd" ]] && dest="/usr/bin/$binary"
+        
+        log_verbose "Installing $binary: $src -> $dest"
+        install -m 755 "$src" "$dest" || log_warn "Failed to install $binary"
+    done
+    
+    local libexec_binaries="sftp-server ssh-keysign ssh-pkcs11-helper"
+    for binary in $libexec_binaries; do
+        local src="/usr/local/libexec/$binary"
+        local dest="/usr/lib/openssh/$binary"
+        if [[ -f "$src" ]]; then
+            log_verbose "Installing $binary: $src -> $dest"
+            install -m 755 "$src" "$dest" || log_warn "Failed to install $binary"
+        fi
+    done
+    
+    local sshd_session="/usr/local/libexec/sshd-session"
+    if [[ -f "$sshd_session" ]]; then
+        log_verbose "Installing sshd-session (required by OpenSSH 9.9+)"
+        install -m 755 "$sshd_session" /usr/lib/openssh/sshd-session || log_warn "Failed to install sshd-session"
+    fi
+    
+    log_verbose "Symlinking config and host keys..."
+    mkdir -p /usr/local/etc
+    ln -sf /etc/ssh/sshd_config /usr/local/etc/sshd_config
+    for keyfile in ssh_host_rsa_key ssh_host_ecdsa_key ssh_host_ed25519_key; do
+        if [[ -f "/etc/ssh/$keyfile" ]]; then
+            ln -sf "/etc/ssh/$keyfile" "/usr/local/etc/$keyfile"
+        fi
+    done
+    
+    log_verbose "Switching from ssh.socket to ssh.service..."
+    if systemctl list-unit-files ssh.socket &>/dev/null 2>&1; then
+        execute_cmd "systemctl stop ssh.socket" "Stopping ssh.socket"
+        execute_cmd "systemctl disable ssh.socket" "Disabling ssh.socket"
+        execute_cmd "systemctl enable ssh" "Enabling ssh.service"
+        execute_cmd "systemctl start ssh" "Starting ssh.service"
+    fi
+    
+    log_success "OpenSSH binaries installed to system paths"
+    return 0
 }
 
 # set_timezone() - Set system timezone
@@ -1379,6 +1480,16 @@ ff02::2 ip6-allrouters"
 
 SCRIPT_DIR="$(dirname "${BASH_SOURCE[0]}")"
 
+disable_ssh_socket() {
+    if systemctl list-unit-files ssh.socket &>/dev/null 2>&1; then
+        log_verbose "Detected ssh.socket (Ubuntu 24.04 socket activation)"
+        execute_cmd "systemctl stop ssh.socket" "Stopping ssh.socket"
+        execute_cmd "systemctl disable ssh.socket" "Disabling ssh.socket"
+        execute_cmd "systemctl enable ssh" "Enabling ssh.service"
+        log_verbose "Switched from ssh.socket to ssh.service"
+    fi
+}
+
 # Harden SSH configuration
 # Creates a hardened sshd_config with security best practices
 harden_ssh() {
@@ -1437,7 +1548,7 @@ HostKey /etc/ssh/ssh_host_ed25519_key
 # Ciphers and algorithms
 Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com,aes256-ctr,aes192-ctr,aes128-ctr
 MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com,hmac-sha2-512,hmac-sha2-256
-KexAlgorithms curve25519-sha256@libssh.org,ecdh-sha2-nistp521,ecdh-sha2-nistp384,ecdh-sha2-nistp256,diffie-hellman-group-exchange-sha256
+KexAlgorithms mlkem768x25519-sha256,curve25519-sha256@libssh.org,ecdh-sha2-nistp521,ecdh-sha2-nistp384,ecdh-sha2-nistp256,diffie-hellman-group-exchange-sha256
 
 # Authentication settings
 PasswordAuthentication no
@@ -1484,17 +1595,33 @@ EOF
     
     log_success "SSH configuration test passed"
     
-    # Restart SSH service
-    log_verbose "Restarting SSH service..."
+    disable_ssh_socket
+    
+    # Reload SSH service (preserves existing sessions)
+    log_verbose "Reloading SSH service..."
     if cmd_exists systemctl; then
-        if systemctl restart sshd 2>/dev/null || systemctl restart ssh; then
-            log_success "SSH service restarted successfully"
+        local ssh_service=""
+        if systemctl list-unit-files ssh.service &>/dev/null 2>&1; then
+            ssh_service="ssh"
+        elif systemctl list-unit-files sshd.service &>/dev/null 2>&1; then
+            ssh_service="sshd"
+        fi
+        
+        if [[ -n "$ssh_service" ]]; then
+            if systemctl reload "$ssh_service" 2>/dev/null; then
+                log_success "SSH service reloaded (existing sessions preserved)"
+            elif systemctl restart "$ssh_service" 2>/dev/null; then
+                log_warn "SSH service restarted (existing sessions may be dropped)"
+            else
+                log_error "Failed to reload/restart SSH service"
+                return 1
+            fi
         else
-            log_error "Failed to restart SSH service"
+            log_error "Could not determine SSH service name"
             return 1
         fi
     else
-        log_warn "systemctl not available - cannot restart SSH service"
+        log_warn "systemctl not available - cannot reload SSH service"
         return 1
     fi
     
