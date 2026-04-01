@@ -16,8 +16,10 @@
 - 🛡️ **Safety Features** - Dry-run mode, automatic backups, rollback capability
 - ⚡ **Performance Tuning** - BBR congestion control, Zram, sysctl optimization
 - 🤖 **Auto-Detection** - Detects RAM and recommends swap/Zram settings
-- 📝 **Comprehensive Logging** - Detailed logs with quiet and verbose modes
+- 📝 **Comprehensive Logging** - All output saved to `/var/log/uservin/`
 - 🔄 **Auto-Updates** - Configurable automatic security updates
+- 🚀 **Background Execution** - Run and disconnect, setup continues automatically
+- 📊 **Status Tracking** - Check progress anytime with `--status`
 
 ## What's Configured
 
@@ -93,9 +95,90 @@ sudo ./uservin.sh --quiet
 # Verbose mode (detailed output)
 sudo ./uservin.sh --verbose
 
+# Check background execution status
+./uservin.sh --status
+
+# Run in foreground (disable auto-background)
+sudo ./uservin.sh --no-background
+
 # Show help
 ./uservin.sh --help
 ```
+
+## Background Execution
+
+When you run uservin interactively with a config file, it automatically backgrounds itself so you can disconnect immediately. Setup continues in the background with full logging.
+
+### How It Works
+
+1. Run uservin with a config file (or after completing the wizard)
+2. The script detects an interactive terminal and auto-backgrounds itself
+3. You see the log file path and can disconnect immediately
+4. Check progress anytime with `--status` or `tail -f`
+
+### Example Output
+
+```
+uservin is now running in background.
+
+Log file: /var/log/uservin/uservin-20250401-143022-12345.log
+Status file: /var/log/uservin/status-20250401-143022-12345.json
+
+Check progress with:
+  tail -f /var/log/uservin/uservin-*.log
+
+Check status with:
+  uservin.sh --status
+```
+
+### Checking Progress
+
+Watch the log in real-time:
+```bash
+tail -f /var/log/uservin/uservin-*.log
+```
+
+Or check the status summary:
+```bash
+./uservin.sh --status
+```
+
+### Status Command
+
+`--status` shows the current or most recent run:
+
+```
+========================================
+   uservin Status
+========================================
+
+Run: 20250401-143022-12345
+Status: running
+Started: 2025-04-01T14:30:22+07:00
+Message: Configuring security...
+PID: 12345
+
+Process is currently running.
+
+Log file: /var/log/uservin/uservin-20250401-143022-12345.log
+```
+
+### Foreground Mode
+
+To keep the script in the foreground (e.g., for debugging or CI/CD):
+```bash
+sudo ./uservin.sh --no-background
+```
+
+### Log Files
+
+All output is saved to `/var/log/uservin/` with timestamped filenames:
+
+| File | Description |
+|------|-------------|
+| `uservin-YYYYMMDD-HHMMSS-PID.log` | Full execution log |
+| `status-YYYYMMDD-HHMMSS-PID.json` | Machine-readable status |
+| `pid-YYYYMMDD-HHMMSS-PID.pid` | Process ID file |
 
 ## Interactive Wizard
 
@@ -198,7 +281,11 @@ ssh -p <port> <username>@<hostname>
 
 ### Check Logs
 ```bash
-sudo cat /var/log/uservin.log
+# Latest log
+sudo tail -f /var/log/uservin/uservin-*.log
+
+# Or check status
+./uservin.sh --status
 ```
 
 ### Port Already in Use
