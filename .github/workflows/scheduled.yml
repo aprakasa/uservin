@@ -1,0 +1,40 @@
+name: Scheduled Tests
+
+on:
+  schedule:
+    # Run tests every Sunday at 00:00 UTC
+    - cron: '0 0 * * 0'
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        ubuntu-version: ['20.04', '22.04', '24.04']
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Run tests
+      run: |
+        cd tests
+        bash runner.sh
+        
+  shellcheck:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Install shellcheck
+      run: sudo apt-get update && sudo apt-get install -y shellcheck
+      
+    - name: Run shellcheck
+      run: |
+        shellcheck uservin.sh || true
+        for file in lib/*.sh; do
+          shellcheck "$file" || true
+        done

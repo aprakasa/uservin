@@ -1,0 +1,44 @@
+name: Auto Build
+
+on:
+  push:
+    branches: [ main, master ]
+    paths: ['lib/**', 'build.sh', 'Makefile']
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        
+    - name: Setup Git
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        
+    - name: Build uservin.sh
+      run: make build
+      
+    - name: Check for changes
+      id: check
+      run: |
+        if git diff --quiet uservin.sh; then
+          echo "changed=false" >> $GITHUB_OUTPUT
+          echo "No changes to uservin.sh"
+        else
+          echo "changed=true" >> $GITHUB_OUTPUT
+          echo "Changes detected in uservin.sh"
+        fi
+        
+    - name: Commit and push
+      if: steps.check.outputs.changed == 'true'
+      run: |
+        git add uservin.sh
+        git commit -m "chore(build): auto-update bundled uservin.sh - triggered by changes to library files"
+        git push

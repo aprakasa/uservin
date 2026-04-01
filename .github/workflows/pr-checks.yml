@@ -1,0 +1,66 @@
+name: PR Checks
+
+on:
+  pull_request:
+    branches: [ main, master ]
+    paths:
+      - 'lib/**'
+      - 'tests/**'
+      - 'Makefile'
+      - 'build.sh'
+      - 'uservin.sh'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    name: Run Tests
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Run test suite
+      run: |
+        cd tests
+        bash runner.sh
+        
+  shellcheck:
+    runs-on: ubuntu-latest
+    name: ShellCheck
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Install shellcheck
+      run: sudo apt-get update && sudo apt-get install -y shellcheck
+      
+    - name: Run shellcheck
+      run: |
+        shellcheck uservin.sh
+        for file in lib/*.sh; do
+          shellcheck "$file"
+        done
+        echo "Shellcheck passed!"
+        
+  build-test:
+    runs-on: ubuntu-latest
+    name: Build Test
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Test build process
+      run: |
+        make build
+        
+    - name: Verify bundled script
+      run: |
+        bash -n uservin.sh
+        echo "Syntax check passed!"
+        
+    - name: Test bundled script
+      run: |
+        bash uservin.sh --version
+        bash uservin.sh --help
