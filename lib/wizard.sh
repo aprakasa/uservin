@@ -215,3 +215,111 @@ run_wizard() {
         exit 0
     fi
 }
+
+# Load configuration from INI file
+# Arguments:
+#   CONFIG_FILE - Global variable with path to config file
+# Returns: 0 on success, 1 on failure
+load_config_file() {
+    if [[ ! -f "$CONFIG_FILE" ]]; then
+        log_error "Configuration file not found: $CONFIG_FILE"
+        return 1
+    fi
+    
+    log_info "Parsing configuration file: $CONFIG_FILE"
+    
+    # Parse the INI file
+    local section=""
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        # Skip comments and empty lines
+        [[ "$line" =~ ^[[:space:]]*# ]] && continue
+        [[ "$line" =~ ^[[:space:]]*$ ]] && continue
+        
+        # Check for section header
+        if [[ "$line" =~ ^\[([^]]+)\]$ ]]; then
+            section="${BASH_REMATCH[1]}"
+            continue
+        fi
+        
+        # Parse key=value pairs
+        if [[ "$line" =~ ^[[:space:]]*([^=]+)[[:space:]]*=[[:space:]]*(.*)$ ]]; then
+            local key="${BASH_REMATCH[1]}"
+            local value="${BASH_REMATCH[2]}"
+            
+            # Trim whitespace and remove trailing newlines
+            key=$(echo -n "$key" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            value=$(echo -n "$value" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            
+            # Map configuration values
+            case "$section:$key" in
+                "system:hostname")
+                    CONFIG_HOSTNAME="$value"
+                    log_info "  Hostname: $value"
+                    ;;
+                "system:timezone")
+                    CONFIG_TIMEZONE="$value"
+                    log_info "  Timezone: $value"
+                    ;;
+                "user:username")
+                    CONFIG_USERNAME="$value"
+                    log_info "  Username: $value"
+                    ;;
+                "user:ssh_key")
+                    CONFIG_SSH_KEY="$value"
+                    log_info "  SSH key configured"
+                    ;;
+                "ssh:port")
+                    CONFIG_SSH_PORT="$value"
+                    log_info "  SSH Port: $value"
+                    ;;
+                "security:enable_ufw")
+                    [[ "$value" == "true" ]] && log_info "  UFW: enabled"
+                    ;;
+                "security:enable_fail2ban")
+                    [[ "$value" == "true" ]] && log_info "  Fail2ban: enabled"
+                    ;;
+                "updates:auto_updates")
+                    CONFIG_ENABLE_AUTO_UPDATES="$value"
+                    log_info "  Auto updates: $value"
+                    ;;
+                "performance:swap_size")
+                    CONFIG_ENABLE_SWAP="true"
+                    log_info "  Swap: enabled"
+                    ;;
+                "performance:enable_zram")
+                    CONFIG_ENABLE_ZRAM="$value"
+                    log_info "  Zram: $value"
+                    ;;
+                "performance:enable_bbr")
+                    [[ "$value" == "true" ]] && log_info "  BBR: enabled"
+                    ;;
+            esac
+        fi
+    done < "$CONFIG_FILE"
+    
+    # Validate required fields
+    if [[ -z "$CONFIG_HOSTNAME" ]]; then
+        log_error "Missing required configuration: system.hostname"
+        return 1
+    fi
+    
+    if [[ -z "$CONFIG_USERNAME" ]]; then
+        log_error "Missing required configuration: user.username"
+        return 1
+    fi
+    
+    if [[ -z "$CONFIG_SSH_KEY" ]]; then
+        log_error "Missing required configuration: user.ssh_key"
+        return 1
+    fi
+    
+    # Set defaults for optional fields
+    [[ -z "$CONFIG_TIMEZONE" ]] && CONFIG_TIMEZONE="UTC"
+    [[ -z "$CONFIG_SSH_PORT" ]] && CONFIG_SSH_PORT="22"
+    [[ -z "$CONFIG_ENABLE_AUTO_UPDATES" ]] && CONFIG_ENABLE_AUTO_UPDATES="true"
+    [[ -z "$CONFIG_ENABLE_ZRAM" ]] && CONFIG_ENABLE_ZRAM="true"
+    [[ -z "$CONFIG_ENABLE_SWAP" ]] && CONFIG_ENABLE_SWAP="true"
+    
+    log_success "Configuration loaded successfully"
+    return 0
+}
