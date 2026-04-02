@@ -8,11 +8,16 @@
 
 **uservin** is a comprehensive Ubuntu server initialization script that automates security hardening, user management, system optimization, and intelligent configuration through an interactive wizard.
 
+---
+
+⚠️ **Note**: Always test on a non-production server first. Use `--dry-run` to preview changes.
+
 ## Features
 
 - 🎯 **One-Liner Install** - Single command setup: `wget -qO- URL | sudo bash`
 - 🧙 **Interactive Wizard** - Step-by-step configuration with sensible defaults
 - 🔒 **Security Hardening** - SSH key authentication, UFW firewall, fail2ban
+- 🧬 **Post-Quantum Crypto** - OpenSSH 9.9p1 compiled from source with ML-KEM key exchange
 - 🛡️ **Safety Features** - Dry-run mode, automatic backups, rollback capability
 - ⚡ **Performance Tuning** - BBR congestion control, Zram, sysctl optimization
 - 🤖 **Auto-Detection** - Detects RAM and recommends swap/Zram settings
@@ -30,6 +35,7 @@
 - System locale setup
 
 ### Security
+- OpenSSH upgrade from source (9.9p1+) for ML-KEM post-quantum key exchange
 - SSH hardening (custom port, disable root login, key-only auth)
 - UFW firewall with port configuration
 - fail2ban intrusion prevention
@@ -54,6 +60,7 @@
 - **Network**: Internet connection for package installation
 - **SSH Key**: Valid SSH public key for user authentication
 - **Bash**: Version 4.0 or higher
+- **Build Tools**: Auto-installed for OpenSSH source compilation (build-essential, libssl-dev, etc.)
 
 ## Quick Start
 
@@ -311,7 +318,3 @@ sudo ss -tlnp | grep <port>
 ## License
 
 MIT License - see [LICENSE](LICENSE) file for details.
-
----
-
-⚠️ **Note**: Always test on a non-production server first. Use `--dry-run` to preview changes.
