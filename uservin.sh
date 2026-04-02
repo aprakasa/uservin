@@ -1448,10 +1448,10 @@ download_openssh_deb() {
     fi
 
     log_info "Installing OpenSSH package..."
-    if ! execute_cmd "DEBIAN_FRONTEND=noninteractive dpkg -i $tmp_deb" "Installing OpenSSH .deb"; then
+    if ! execute_cmd "DEBIAN_FRONTEND=noninteractive dpkg --auto-deconfigure -i $tmp_deb" "Installing OpenSSH .deb"; then
         log_warn "dpkg install failed, attempting to fix dependencies..."
         execute_cmd "DEBIAN_FRONTEND=noninteractive apt-get install -f -y -qq" "Fixing broken dependencies"
-        if ! execute_cmd "DEBIAN_FRONTEND=noninteractive dpkg -i $tmp_deb" "Retrying OpenSSH .deb install"; then
+        if ! execute_cmd "DEBIAN_FRONTEND=noninteractive dpkg --auto-deconfigure -i $tmp_deb" "Retrying OpenSSH .deb install"; then
             rm -f "$tmp_deb"
             return 1
         fi
@@ -1634,16 +1634,13 @@ harden_ssh() {
     
     local kex_algorithms="curve25519-sha256@libssh.org,ecdh-sha2-nistp521,ecdh-sha2-nistp384,ecdh-sha2-nistp256,diffie-hellman-group-exchange-sha256"
     local pq_algorithms=""
-    if sshd -T -o "kexalgorithms=+mlkem768x25519-sha256" 2>/dev/null | grep -q "mlkem768x25519-sha256"; then
+    if ssh -Q kex 2>/dev/null | grep -q "mlkem768x25519-sha256"; then
         pq_algorithms="mlkem768x25519-sha256"
         log_verbose "ML-KEM post-quantum key exchange available"
-    elif sshd -Q kex 2>/dev/null | grep -q "mlkem768x25519-sha256"; then
-        pq_algorithms="mlkem768x25519-sha256"
-        log_verbose "ML-KEM post-quantum key exchange available (via -Q)"
     else
         log_verbose "ML-KEM not available, using classical key exchange only"
     fi
-    if sshd -T -o "kexalgorithms=+sntrup761x25519-sha512" 2>/dev/null | grep -q "sntrup761x25519-sha512"; then
+    if ssh -Q kex 2>/dev/null | grep -q "sntrup761x25519-sha512"; then
         pq_algorithms="${pq_algorithms:+$pq_algorithms,}sntrup761x25519-sha512,sntrup761x25519-sha512@openssh.com"
         log_verbose "sntrup761 post-quantum key exchange available"
     fi

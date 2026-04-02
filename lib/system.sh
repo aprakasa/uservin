@@ -339,10 +339,10 @@ download_openssh_deb() {
     fi
 
     log_info "Installing OpenSSH package..."
-    if ! execute_cmd "DEBIAN_FRONTEND=noninteractive dpkg -i $tmp_deb" "Installing OpenSSH .deb"; then
+    if ! execute_cmd "DEBIAN_FRONTEND=noninteractive dpkg --auto-deconfigure -i $tmp_deb" "Installing OpenSSH .deb"; then
         log_warn "dpkg install failed, attempting to fix dependencies..."
         execute_cmd "DEBIAN_FRONTEND=noninteractive apt-get install -f -y -qq" "Fixing broken dependencies"
-        if ! execute_cmd "DEBIAN_FRONTEND=noninteractive dpkg -i $tmp_deb" "Retrying OpenSSH .deb install"; then
+        if ! execute_cmd "DEBIAN_FRONTEND=noninteractive dpkg --auto-deconfigure -i $tmp_deb" "Retrying OpenSSH .deb install"; then
             rm -f "$tmp_deb"
             return 1
         fi
