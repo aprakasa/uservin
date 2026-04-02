@@ -12,7 +12,7 @@ source "$SCRIPT_DIR/wizard.sh"
 source "$SCRIPT_DIR/safety.sh"
 
 disable_ssh_socket() {
-    if systemctl list-unit-files ssh.socket &>/dev/null 2>&1; then
+    if systemctl list-unit-files ssh.socket &>/dev/null; then
         log_verbose "Detected ssh.socket (Ubuntu 24.04 socket activation)"
         execute_cmd "systemctl stop ssh.socket" "Stopping ssh.socket"
         execute_cmd "systemctl disable ssh.socket" "Disabling ssh.socket"
@@ -132,9 +132,9 @@ EOF
     log_verbose "Reloading SSH service..."
     if cmd_exists systemctl; then
         local ssh_service=""
-        if systemctl list-unit-files ssh.service &>/dev/null 2>&1; then
+        if systemctl list-unit-files ssh.service &>/dev/null; then
             ssh_service="ssh"
-        elif systemctl list-unit-files sshd.service &>/dev/null 2>&1; then
+        elif systemctl list-unit-files sshd.service &>/dev/null; then
             ssh_service="sshd"
         fi
         

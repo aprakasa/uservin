@@ -46,6 +46,7 @@ show_completion() {
     echo "Configured Components:"
     echo "  ✓ System packages"
     echo "  ✓ Utilities"
+    echo "  ✓ OpenSSH upgrade (post-quantum ML-KEM)"
     echo "  ✓ Firewall (UFW)"
     echo "  ✓ Fail2ban"
     echo "  ✓ SSH hardening"

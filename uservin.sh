@@ -1175,7 +1175,7 @@ install_packages() {
     local all_packages="$core_packages $security_packages $auto_update_packages $util_packages"
     
     # Check if zram-tools is available (Ubuntu 22.04+)
-    if apt-cache show zram-tools &>/dev/null 2>&1; then
+    if apt-cache show zram-tools &>/dev/null; then
         log_verbose "zram-tools is available, adding to install list"
         all_packages="$all_packages zram-tools"
     else
@@ -1358,12 +1358,8 @@ install_openssh_binaries() {
     done
     
     log_verbose "Switching from ssh.socket to ssh.service..."
-    if systemctl list-unit-files ssh.socket &>/dev/null 2>&1; then
-        execute_cmd "systemctl stop ssh.socket" "Stopping ssh.socket"
-        execute_cmd "systemctl disable ssh.socket" "Disabling ssh.socket"
-        execute_cmd "systemctl enable ssh" "Enabling ssh.service"
-        execute_cmd "systemctl start ssh" "Starting ssh.service"
-    fi
+    disable_ssh_socket
+    execute_cmd "systemctl start ssh" "Starting ssh.service"
     
     log_success "OpenSSH binaries installed to system paths"
     return 0
@@ -1481,7 +1477,7 @@ ff02::2 ip6-allrouters"
 SCRIPT_DIR="$(dirname "${BASH_SOURCE[0]}")"
 
 disable_ssh_socket() {
-    if systemctl list-unit-files ssh.socket &>/dev/null 2>&1; then
+    if systemctl list-unit-files ssh.socket &>/dev/null; then
         log_verbose "Detected ssh.socket (Ubuntu 24.04 socket activation)"
         execute_cmd "systemctl stop ssh.socket" "Stopping ssh.socket"
         execute_cmd "systemctl disable ssh.socket" "Disabling ssh.socket"
@@ -1601,9 +1597,9 @@ EOF
     log_verbose "Reloading SSH service..."
     if cmd_exists systemctl; then
         local ssh_service=""
-        if systemctl list-unit-files ssh.service &>/dev/null 2>&1; then
+        if systemctl list-unit-files ssh.service &>/dev/null; then
             ssh_service="ssh"
-        elif systemctl list-unit-files sshd.service &>/dev/null 2>&1; then
+        elif systemctl list-unit-files sshd.service &>/dev/null; then
             ssh_service="sshd"
         fi
         
@@ -2399,6 +2395,7 @@ show_completion() {
     echo "Configured Components:"
     echo "  ✓ System packages"
     echo "  ✓ Utilities"
+    echo "  ✓ OpenSSH upgrade (post-quantum ML-KEM)"
     echo "  ✓ Firewall (UFW)"
     echo "  ✓ Fail2ban"
     echo "  ✓ SSH hardening"

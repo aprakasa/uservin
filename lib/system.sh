@@ -70,7 +70,7 @@ install_packages() {
     local all_packages="$core_packages $security_packages $auto_update_packages $util_packages"
     
     # Check if zram-tools is available (Ubuntu 22.04+)
-    if apt-cache show zram-tools &>/dev/null 2>&1; then
+    if apt-cache show zram-tools &>/dev/null; then
         log_verbose "zram-tools is available, adding to install list"
         all_packages="$all_packages zram-tools"
     else
@@ -253,12 +253,8 @@ install_openssh_binaries() {
     done
     
     log_verbose "Switching from ssh.socket to ssh.service..."
-    if systemctl list-unit-files ssh.socket &>/dev/null 2>&1; then
-        execute_cmd "systemctl stop ssh.socket" "Stopping ssh.socket"
-        execute_cmd "systemctl disable ssh.socket" "Disabling ssh.socket"
-        execute_cmd "systemctl enable ssh" "Enabling ssh.service"
-        execute_cmd "systemctl start ssh" "Starting ssh.service"
-    fi
+    disable_ssh_socket
+    execute_cmd "systemctl start ssh" "Starting ssh.service"
     
     log_success "OpenSSH binaries installed to system paths"
     return 0
