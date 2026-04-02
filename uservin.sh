@@ -1269,70 +1269,87 @@ compile_openssh_from_source() {
     local openssh_version="$OPENSSH_TARGET_VERSION"
     local tar_url="https://cdn.openbsd.org/pub/OpenBSD/OpenSSH/portable/openssh-${openssh_version}.tar.gz"
     local expected_sha256="$OPENSSH_SHA256"
-    local build_dir
-
-    build_dir=$(mktemp -d /tmp/openssh-build.XXXXXX)
+    local build_dir="/tmp/openssh-build"
+    local src_dir="$build_dir/openssh-${openssh_version}"
 
     log_info "Compiling OpenSSH $openssh_version from source..."
     print_header "OpenSSH Source Compile"
 
+    if [[ -f "/usr/local/sbin/sshd" ]]; then
+        local installed_version
+        installed_version=$(/usr/local/sbin/sshd -V 2>&1 | grep -oP 'OpenSSH_\K[0-9]+\.[0-9]+' || echo "0.0")
+        if [[ "$installed_version" == "${openssh_version%%p*}" ]]; then
+            log_success "OpenSSH $openssh_version already installed to /usr/local"
+            return 0
+        fi
+    fi
+
+    mkdir -p "$build_dir"
+
     log_verbose "Installing build dependencies..."
     if ! execute_cmd "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq build-essential libssl-dev zlib1g-dev libpam0g-dev libkrb5-dev libedit-dev libselinux1-dev" "Installing build dependencies"; then
         log_error "Failed to install build dependencies"
-        rm -rf "$build_dir"
         return 1
     fi
 
-    log_verbose "Downloading OpenSSH $openssh_version..."
-    if ! execute_cmd "curl -fSL -o $build_dir/openssh.tar.gz $tar_url" "Downloading OpenSSH source"; then
-        log_error "Failed to download OpenSSH source"
-        rm -rf "$build_dir"
-        return 1
-    fi
+    if [[ ! -f "$build_dir/openssh.tar.gz" ]]; then
+        log_verbose "Downloading OpenSSH $openssh_version..."
+        if ! execute_cmd "curl -fSL -o $build_dir/openssh.tar.gz $tar_url" "Downloading OpenSSH source"; then
+            log_error "Failed to download OpenSSH source"
+            return 1
+        fi
 
-    log_verbose "Verifying SHA256 checksum..."
-    local actual_sha256
-    actual_sha256=$(sha256sum "$build_dir/openssh.tar.gz" | awk '{print $1}')
-    if [[ "$actual_sha256" != "$expected_sha256" ]]; then
-        log_error "SHA256 checksum mismatch for openssh-${openssh_version}.tar.gz"
-        log_error "Expected: $expected_sha256"
-        log_error "Got:      $actual_sha256"
-        rm -rf "$build_dir"
-        return 1
-    fi
-    log_verbose "SHA256 checksum verified"
-    
-    log_verbose "Extracting source..."
-    if ! execute_cmd "tar -xzf $build_dir/openssh.tar.gz -C $build_dir" "Extracting OpenSSH source"; then
-        log_error "Failed to extract OpenSSH source"
-        rm -rf "$build_dir"
-        return 1
+        log_verbose "Verifying SHA256 checksum..."
+        local actual_sha256
+        actual_sha256=$(sha256sum "$build_dir/openssh.tar.gz" | awk '{print $1}')
+        if [[ "$actual_sha256" != "$expected_sha256" ]]; then
+            log_error "SHA256 checksum mismatch for openssh-${openssh_version}.tar.gz"
+            log_error "Expected: $expected_sha256"
+            log_error "Got:      $actual_sha256"
+            rm -f "$build_dir/openssh.tar.gz"
+            return 1
+        fi
+        log_verbose "SHA256 checksum verified"
+    else
+        log_verbose "Source tarball already downloaded"
     fi
     
-    local src_dir="$build_dir/openssh-${openssh_version}"
-    
-    log_verbose "Configuring OpenSSH..."
-    if ! execute_cmd "cd $src_dir && ./configure --prefix=/usr/local --with-pam --with-privsep-path=/run/sshd --with-pid-dir=/run" "Configuring OpenSSH build"; then
-        log_error "Failed to configure OpenSSH"
-        rm -rf "$build_dir"
-        return 1
+    if [[ ! -d "$src_dir" ]]; then
+        log_verbose "Extracting source..."
+        if ! execute_cmd "tar -xzf $build_dir/openssh.tar.gz -C $build_dir" "Extracting OpenSSH source"; then
+            log_error "Failed to extract OpenSSH source"
+            return 1
+        fi
+    else
+        log_verbose "Source already extracted"
     fi
     
-    log_verbose "Compiling OpenSSH..."
-    if ! execute_cmd "make -C $src_dir -j\$(nproc)" "Compiling OpenSSH (this may take a few minutes)"; then
-        log_error "Failed to compile OpenSSH"
-        rm -rf "$build_dir"
-        return 1
+    if [[ ! -f "$src_dir/Makefile" ]]; then
+        log_verbose "Configuring OpenSSH..."
+        if ! execute_cmd "cd $src_dir && ./configure --prefix=/usr/local --with-pam --with-privsep-path=/run/sshd --with-pid-dir=/run" "Configuring OpenSSH build"; then
+            log_error "Failed to configure OpenSSH"
+            return 1
+        fi
+    else
+        log_verbose "OpenSSH already configured"
+    fi
+    
+    if [[ ! -f "$src_dir/sshd" ]]; then
+        log_verbose "Compiling OpenSSH..."
+        if ! execute_cmd "make -C $src_dir -j\$(nproc)" "Compiling OpenSSH (this may take a few minutes)"; then
+            log_error "Failed to compile OpenSSH"
+            return 1
+        fi
+    else
+        log_verbose "OpenSSH already compiled"
     fi
     
     log_verbose "Installing to /usr/local prefix..."
     if ! execute_cmd "make -C $src_dir install" "Installing OpenSSH to /usr/local"; then
         log_error "Failed to install OpenSSH"
-        rm -rf "$build_dir"
         return 1
     fi
     
-    rm -rf "$build_dir"
     log_success "OpenSSH $openssh_version compiled and installed to /usr/local"
     return 0
 }
@@ -1548,6 +1565,14 @@ harden_ssh() {
     # Backup original configuration
     backup_file "$sshd_config"
     
+    local kex_algorithms="curve25519-sha256@libssh.org,ecdh-sha2-nistp521,ecdh-sha2-nistp384,ecdh-sha2-nistp256,diffie-hellman-group-exchange-sha256"
+    if sshd -Q kex 2>/dev/null | grep -q "mlkem768x25519-sha256"; then
+        kex_algorithms="mlkem768x25519-sha256,$kex_algorithms"
+        log_verbose "ML-KEM post-quantum key exchange available"
+    else
+        log_verbose "ML-KEM not available, using classical key exchange only"
+    fi
+
     # Create hardened configuration
     log_verbose "Creating hardened sshd_config..."
     
@@ -1570,7 +1595,7 @@ HostKey /etc/ssh/ssh_host_ed25519_key
 # Ciphers and algorithms
 Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com,aes256-ctr,aes192-ctr,aes128-ctr
 MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com,hmac-sha2-512,hmac-sha2-256
-KexAlgorithms mlkem768x25519-sha256,curve25519-sha256@libssh.org,ecdh-sha2-nistp521,ecdh-sha2-nistp384,ecdh-sha2-nistp256,diffie-hellman-group-exchange-sha256
+KexAlgorithms $kex_algorithms
 
 # Authentication settings
 PasswordAuthentication no
@@ -1607,6 +1632,8 @@ Subsystem sftp /usr/lib/openssh/sftp-server
 EOF
     
     log_verbose "SSH configuration written successfully"
+    
+    mkdir -p /run/sshd
     
     # Test configuration before applying
     log_verbose "Testing SSH configuration..."
@@ -2410,7 +2437,11 @@ show_completion() {
     echo "Configured Components:"
     echo "  ✓ System packages"
     echo "  ✓ Utilities"
-    echo "  ✓ OpenSSH upgrade (post-quantum ML-KEM)"
+    local openssh_label="  ✓ OpenSSH upgrade"
+    if sshd -Q kex 2>/dev/null | grep -q "mlkem768x25519-sha256"; then
+        openssh_label="$openssh_label (post-quantum ML-KEM)"
+    fi
+    echo "$openssh_label"
     echo "  ✓ Firewall (UFW)"
     echo "  ✓ Fail2ban"
     echo "  ✓ SSH hardening"

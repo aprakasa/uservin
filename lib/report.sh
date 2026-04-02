@@ -54,7 +54,11 @@ show_completion() {
     echo "Configured Components:"
     echo "  ✓ System packages"
     echo "  ✓ Utilities"
-    echo "  ✓ OpenSSH upgrade (post-quantum ML-KEM)"
+    local openssh_label="  ✓ OpenSSH upgrade"
+    if sshd -Q kex 2>/dev/null | grep -q "mlkem768x25519-sha256"; then
+        openssh_label="$openssh_label (post-quantum ML-KEM)"
+    fi
+    echo "$openssh_label"
     echo "  ✓ Firewall (UFW)"
     echo "  ✓ Fail2ban"
     echo "  ✓ SSH hardening"

@@ -57,6 +57,14 @@ harden_ssh() {
     # Backup original configuration
     backup_file "$sshd_config"
     
+    local kex_algorithms="curve25519-sha256@libssh.org,ecdh-sha2-nistp521,ecdh-sha2-nistp384,ecdh-sha2-nistp256,diffie-hellman-group-exchange-sha256"
+    if sshd -Q kex 2>/dev/null | grep -q "mlkem768x25519-sha256"; then
+        kex_algorithms="mlkem768x25519-sha256,$kex_algorithms"
+        log_verbose "ML-KEM post-quantum key exchange available"
+    else
+        log_verbose "ML-KEM not available, using classical key exchange only"
+    fi
+
     # Create hardened configuration
     log_verbose "Creating hardened sshd_config..."
     
@@ -79,7 +87,7 @@ HostKey /etc/ssh/ssh_host_ed25519_key
 # Ciphers and algorithms
 Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com,aes256-ctr,aes192-ctr,aes128-ctr
 MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com,hmac-sha2-512,hmac-sha2-256
-KexAlgorithms mlkem768x25519-sha256,curve25519-sha256@libssh.org,ecdh-sha2-nistp521,ecdh-sha2-nistp384,ecdh-sha2-nistp256,diffie-hellman-group-exchange-sha256
+KexAlgorithms $kex_algorithms
 
 # Authentication settings
 PasswordAuthentication no
@@ -116,6 +124,8 @@ Subsystem sftp /usr/lib/openssh/sftp-server
 EOF
     
     log_verbose "SSH configuration written successfully"
+    
+    mkdir -p /run/sshd
     
     # Test configuration before applying
     log_verbose "Testing SSH configuration..."

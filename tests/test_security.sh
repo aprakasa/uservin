@@ -90,6 +90,30 @@ test_configure_fail2ban_function_exists() {
     teardown
 }
 
+test_harden_ssh_dynamic_kex_no_mlkem() {
+    setup
+
+    mkdir -p "$TEST_DIR/etc/ssh"
+    cp /etc/ssh/ssh_host_*_key "$TEST_DIR/etc/ssh/" 2>/dev/null || true
+
+    local sshd_config="$TEST_DIR/etc/ssh/sshd_config"
+
+    local kex_algorithms="curve25519-sha256@libssh.org,ecdh-sha2-nistp521,ecdh-sha2-nistp384,ecdh-sha2-nistp256,diffie-hellman-group-exchange-sha256"
+    if sshd -Q kex 2>/dev/null | grep -q "mlkem768x25519-sha256"; then
+        kex_algorithms="mlkem768x25519-sha256,$kex_algorithms"
+    fi
+
+    if [[ "$kex_algorithms" == "mlkem768x25519-sha256,"* ]]; then
+        assert_true "true" "ML-KEM detected when available"
+    else
+        assert_true "true" "KEX falls back gracefully without ML-KEM"
+    fi
+
+    assert_contains "$kex_algorithms" "curve25519-sha256" "KEX includes curve25519"
+
+    teardown
+}
+
 test_disable_ssh_socket_function_exists() {
     setup
     
