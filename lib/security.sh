@@ -420,8 +420,10 @@ EOF
     # Restart unattended-upgrades service
     log_verbose "Restarting unattended-upgrades service..."
     if cmd_exists systemctl; then
-        if systemctl restart unattended-upgrades 2>/dev/null || true; then
+        if systemctl restart unattended-upgrades 2>/dev/null; then
             log_verbose "Unattended-upgrades service restarted"
+        else
+            log_warn "Failed to restart unattended-upgrades service"
         fi
         
         # Enable on boot

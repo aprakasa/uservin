@@ -11,6 +11,10 @@ source "$(dirname "${BASH_SOURCE[0]}")/wizard.sh"
 # shellcheck source=/dev/null
 source "$(dirname "${BASH_SOURCE[0]}")/safety.sh"
 
+# OpenSSH target version for source compile
+readonly OPENSSH_TARGET_VERSION="9.9p1"
+readonly OPENSSH_SHA256="b343fbcdbff87f15b1b3c3e1b8c1c17d2c16b8918c765e0436d2a0ea3762772e"
+
 # update_system() - Update system packages
 # Performs full system update including:
 # - apt-get update
@@ -153,28 +157,41 @@ upgrade_openssh() {
 }
 
 compile_openssh_from_source() {
-    local openssh_version="9.9p1"
+    local openssh_version="$OPENSSH_TARGET_VERSION"
     local tar_url="https://cdn.openbsd.org/pub/OpenBSD/OpenSSH/portable/openssh-${openssh_version}.tar.gz"
+    local expected_sha256="$OPENSSH_SHA256"
     local build_dir
-    
+
     build_dir=$(mktemp -d /tmp/openssh-build.XXXXXX)
-    
+
     log_info "Compiling OpenSSH $openssh_version from source..."
     print_header "OpenSSH Source Compile"
-    
+
     log_verbose "Installing build dependencies..."
     if ! execute_cmd "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq build-essential libssl-dev zlib1g-dev libpam0g-dev libkrb5-dev libedit-dev libselinux1-dev" "Installing build dependencies"; then
         log_error "Failed to install build dependencies"
         rm -rf "$build_dir"
         return 1
     fi
-    
+
     log_verbose "Downloading OpenSSH $openssh_version..."
     if ! execute_cmd "curl -fSL -o $build_dir/openssh.tar.gz $tar_url" "Downloading OpenSSH source"; then
         log_error "Failed to download OpenSSH source"
         rm -rf "$build_dir"
         return 1
     fi
+
+    log_verbose "Verifying SHA256 checksum..."
+    local actual_sha256
+    actual_sha256=$(sha256sum "$build_dir/openssh.tar.gz" | awk '{print $1}')
+    if [[ "$actual_sha256" != "$expected_sha256" ]]; then
+        log_error "SHA256 checksum mismatch for openssh-${openssh_version}.tar.gz"
+        log_error "Expected: $expected_sha256"
+        log_error "Got:      $actual_sha256"
+        rm -rf "$build_dir"
+        return 1
+    fi
+    log_verbose "SHA256 checksum verified"
     
     log_verbose "Extracting source..."
     if ! execute_cmd "tar -xzf $build_dir/openssh.tar.gz -C $build_dir" "Extracting OpenSSH source"; then
@@ -341,22 +358,27 @@ set_hostname() {
     # Update /etc/hosts with proper entries
     log_verbose "Updating /etc/hosts..."
     
-    # Create new hosts file content
-    local hosts_content
-    hosts_content="127.0.0.1 localhost $hostname
+    # Write /etc/hosts directly (avoid passing multi-line content through execute_cmd)
+    log_verbose "Writing /etc/hosts..."
+    if [[ "$DRY_RUN" == "true" ]]; then
+        echo -e "${YELLOW}[DRY-RUN]${NC} Would update /etc/hosts with hostname $hostname"
+    else
+        cat > /etc/hosts << EOF
+127.0.0.1 localhost $hostname
 127.0.1.1 $hostname
 
 # The following lines are desirable for IPv6 capable hosts
 ::1     localhost ip6-localhost ip6-loopback
 ff02::1 ip6-allnodes
-ff02::2 ip6-allrouters"
-    
-    if execute_cmd "echo '$hosts_content' > /etc/hosts" "Updating /etc/hosts"; then
-        log_success "Hostname set to: $hostname"
-        log_verbose "Updated /etc/hosts with new hostname"
-        return 0
-    else
-        log_error "Failed to update /etc/hosts"
-        return 1
+ff02::2 ip6-allrouters
+EOF
+        if [[ $? -eq 0 ]]; then
+            log_success "Hostname set to: $hostname"
+            log_verbose "Updated /etc/hosts with new hostname"
+        else
+            log_error "Failed to update /etc/hosts"
+            return 1
+        fi
     fi
+    return 0
 }
