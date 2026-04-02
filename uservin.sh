@@ -252,6 +252,17 @@ is_ubuntu_supported() {
     esac
 }
 
+# Get total system memory in GB
+get_mem_gb() {
+    if [[ -f /proc/meminfo ]]; then
+        local mem_kb
+        mem_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+        echo $((mem_kb / 1024 / 1024))
+    else
+        echo "0"
+    fi
+}
+
 # Get system specifications
 get_system_specs() {
     local specs=""
@@ -263,10 +274,8 @@ get_system_specs() {
     
     # Memory
     local mem_gb
-    if [[ -f /proc/meminfo ]]; then
-        mem_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
-        mem_gb=$((mem_kb / 1024 / 1024))
-    else
+    mem_gb=$(get_mem_gb)
+    if [[ "$mem_gb" -eq 0 ]]; then
         mem_gb="Unknown"
     fi
     specs+="RAM: ${mem_gb}GB\n"
@@ -837,11 +846,11 @@ get_config() {
 # Show welcome banner with ASCII art and feature list
 show_welcome() {
     echo -e "${CYAN}"
-    echo -e '  _   _                 _           _'
-    echo -e ' | | | | ___ _   _ _ __| | __ _ ___| |_'
-    echo -e ' | | | |/ __| | | | '"'"'__'"'"'| |/ \` / __| __|'
-    echo -e ' | |_| |\__ \ |_| | |  | | (_| \__ \ |_'
-    echo -e '  \___/ |___/\__,_|_|  |_|\__,_|___/\__|'
+    echo -e '                           _       '
+    echo -e '  _   _ ___  ___ _ ____   _(_)_ __  '
+    echo -e ' | | | / __|/ _ \ '"'"'__\ \ / / | '"'"'_ \ '
+    echo -e ' | |_| \__ \  __/ |   \ V /| | | | |'
+    echo -e '  \__,_|___/\___|_|    \_/ |_|_| |_|'
     echo -e "${NC}"
     echo -e "${BOLD}Ubuntu Server Provisioning Wizard${NC}"
     echo ""
@@ -871,10 +880,10 @@ run_wizard() {
     current_hostname=$(hostname 2>/dev/null || echo "ubuntu-server")
     while true; do
         CONFIG_HOSTNAME=$(prompt_input "Enter hostname" "$current_hostname")
-        if [[ -n "$CONFIG_HOSTNAME" && "$CONFIG_HOSTNAME" =~ ^[a-zA-Z0-9][-a-zA-Z0-9]*$ ]]; then
+        if [[ -n "$CONFIG_HOSTNAME" && "$CONFIG_HOSTNAME" =~ ^[a-zA-Z0-9]([-a-zA-Z0-9]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([-a-zA-Z0-9]*[a-zA-Z0-9])?)*$ ]]; then
             break
         fi
-        log_error "Invalid hostname. Use alphanumeric characters and hyphens only."
+        log_error "Invalid hostname. Use alphanumeric characters, hyphens, and dots (for FQDNs)."
     done
     log_success "Hostname set to: $CONFIG_HOSTNAME"
     
@@ -931,13 +940,8 @@ run_wizard() {
     
     # Step 7: Swap/Zram configuration (auto-detect based on RAM)
     local mem_gb
-    if [[ -f /proc/meminfo ]]; then
-        local mem_kb
-        mem_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
-        mem_gb=$((mem_kb / 1024 / 1024))
-    else
-        mem_gb=4  # Default assumption if we can't detect
-    fi
+    mem_gb=$(get_mem_gb)
+    [[ "$mem_gb" -eq 0 ]] && mem_gb=4
     
     log_info "Detected ${mem_gb}GB RAM"
     
@@ -1116,6 +1120,10 @@ load_config_file() {
 
 # Source dependencies
 
+# OpenSSH target version for source compile
+readonly OPENSSH_TARGET_VERSION="9.9p1"
+readonly OPENSSH_SHA256="b343fbcdbff87f15b1b3c3e1b8c1c17d2c16b8918c765e0436d2a0ea3762772e"
+
 # update_system() - Update system packages
 # Performs full system update including:
 # - apt-get update
@@ -1258,28 +1266,41 @@ upgrade_openssh() {
 }
 
 compile_openssh_from_source() {
-    local openssh_version="9.9p1"
+    local openssh_version="$OPENSSH_TARGET_VERSION"
     local tar_url="https://cdn.openbsd.org/pub/OpenBSD/OpenSSH/portable/openssh-${openssh_version}.tar.gz"
+    local expected_sha256="$OPENSSH_SHA256"
     local build_dir
-    
+
     build_dir=$(mktemp -d /tmp/openssh-build.XXXXXX)
-    
+
     log_info "Compiling OpenSSH $openssh_version from source..."
     print_header "OpenSSH Source Compile"
-    
+
     log_verbose "Installing build dependencies..."
     if ! execute_cmd "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq build-essential libssl-dev zlib1g-dev libpam0g-dev libkrb5-dev libedit-dev libselinux1-dev" "Installing build dependencies"; then
         log_error "Failed to install build dependencies"
         rm -rf "$build_dir"
         return 1
     fi
-    
+
     log_verbose "Downloading OpenSSH $openssh_version..."
     if ! execute_cmd "curl -fSL -o $build_dir/openssh.tar.gz $tar_url" "Downloading OpenSSH source"; then
         log_error "Failed to download OpenSSH source"
         rm -rf "$build_dir"
         return 1
     fi
+
+    log_verbose "Verifying SHA256 checksum..."
+    local actual_sha256
+    actual_sha256=$(sha256sum "$build_dir/openssh.tar.gz" | awk '{print $1}')
+    if [[ "$actual_sha256" != "$expected_sha256" ]]; then
+        log_error "SHA256 checksum mismatch for openssh-${openssh_version}.tar.gz"
+        log_error "Expected: $expected_sha256"
+        log_error "Got:      $actual_sha256"
+        rm -rf "$build_dir"
+        return 1
+    fi
+    log_verbose "SHA256 checksum verified"
     
     log_verbose "Extracting source..."
     if ! execute_cmd "tar -xzf $build_dir/openssh.tar.gz -C $build_dir" "Extracting OpenSSH source"; then
@@ -1446,24 +1467,29 @@ set_hostname() {
     # Update /etc/hosts with proper entries
     log_verbose "Updating /etc/hosts..."
     
-    # Create new hosts file content
-    local hosts_content
-    hosts_content="127.0.0.1 localhost $hostname
+    # Write /etc/hosts directly (avoid passing multi-line content through execute_cmd)
+    log_verbose "Writing /etc/hosts..."
+    if [[ "$DRY_RUN" == "true" ]]; then
+        echo -e "${YELLOW}[DRY-RUN]${NC} Would update /etc/hosts with hostname $hostname"
+    else
+        cat > /etc/hosts << EOF
+127.0.0.1 localhost $hostname
 127.0.1.1 $hostname
 
 # The following lines are desirable for IPv6 capable hosts
 ::1     localhost ip6-localhost ip6-loopback
 ff02::1 ip6-allnodes
-ff02::2 ip6-allrouters"
-    
-    if execute_cmd "echo '$hosts_content' > /etc/hosts" "Updating /etc/hosts"; then
-        log_success "Hostname set to: $hostname"
-        log_verbose "Updated /etc/hosts with new hostname"
-        return 0
-    else
-        log_error "Failed to update /etc/hosts"
-        return 1
+ff02::2 ip6-allrouters
+EOF
+        if [[ $? -eq 0 ]]; then
+            log_success "Hostname set to: $hostname"
+            log_verbose "Updated /etc/hosts with new hostname"
+        else
+            log_error "Failed to update /etc/hosts"
+            return 1
+        fi
     fi
+    return 0
 }
 
 # =========================================================
@@ -1885,8 +1911,10 @@ EOF
     # Restart unattended-upgrades service
     log_verbose "Restarting unattended-upgrades service..."
     if cmd_exists systemctl; then
-        if systemctl restart unattended-upgrades 2>/dev/null || true; then
+        if systemctl restart unattended-upgrades 2>/dev/null; then
             log_verbose "Unattended-upgrades service restarted"
+        else
+            log_warn "Failed to restart unattended-upgrades service"
         fi
         
         # Enable on boot
@@ -2080,15 +2108,10 @@ optimize_performance() {
     log_info "Optimizing system performance..."
     
     # Detect system specs
-    local cpu_cores mem_kb mem_gb disk_type
+    local cpu_cores mem_gb disk_type
     cpu_cores=$(nproc 2>/dev/null || echo "1")
-    
-    if [[ -f /proc/meminfo ]]; then
-        mem_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
-        mem_gb=$((mem_kb / 1024 / 1024))
-    else
-        mem_gb=2
-    fi
+    mem_gb=$(get_mem_gb)
+    [[ "$mem_gb" -eq 0 ]] && mem_gb=2
     
     # Detect SSD by checking /sys/block/*/queue/rotational
     disk_type="HDD"
@@ -2213,13 +2236,9 @@ configure_swap() {
     fi
     
     # Detect RAM for swap sizing
-    local mem_kb mem_gb swap_size
-    if [[ -f /proc/meminfo ]]; then
-        mem_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
-        mem_gb=$((mem_kb / 1024 / 1024))
-    else
-        mem_gb=2
-    fi
+    local mem_gb swap_size
+    mem_gb=$(get_mem_gb)
+    [[ "$mem_gb" -eq 0 ]] && mem_gb=2
     
     # Determine swap size: 2GB default, adjust if RAM < 2GB
     if [[ $mem_gb -lt 2 ]]; then
@@ -2279,13 +2298,9 @@ configure_zram() {
     fi
     
     # Detect RAM for zram sizing
-    local mem_kb mem_gb zram_size
-    if [[ -f /proc/meminfo ]]; then
-        mem_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
-        mem_gb=$((mem_kb / 1024 / 1024))
-    else
-        mem_gb=2
-    fi
+    local mem_gb zram_size
+    mem_gb=$(get_mem_gb)
+    [[ "$mem_gb" -eq 0 ]] && mem_gb=2
     
     # Set size to 50% of RAM, minimum 512M
     local zram_mb=$((mem_gb * 1024 / 2))
@@ -2426,9 +2441,9 @@ show_completion() {
     
     # Show backup and restore information
     echo "Backup Information:"
-    echo "  Backup Location: /root/uservin-backup-*"
-    echo "  Log File: /root/uservin-*.log"
-    echo "  Restore Command: /root/restore-uservin.sh"
+    echo "  Backup Location: /root/uservin-backups/"
+    echo "  Log File: /var/log/uservin/"
+    echo "  Restore Script: /root/uservin-backups/<timestamp>/restore.sh"
     if [[ -n "${LOG_FILE:-}" ]] && [[ -f "${LOG_FILE:-}" ]]; then
         echo "  Full Setup Log: $LOG_FILE"
     fi
@@ -2469,7 +2484,7 @@ show_completion() {
 
 # Execute all setup functions in order
 # Returns: 0 on success, 1 on critical failure
-te_setup() {
+execute_setup() {
     local critical_failed=false
     
     log_info "Starting server setup..."
@@ -2652,10 +2667,6 @@ te_setup() {
     return 0
 }
 
-# Alias for compatibility with test expectations
-execute_setup() {
-    te_setup "$@"
-}
 
 # =========================================================
 # Main Entry Point
