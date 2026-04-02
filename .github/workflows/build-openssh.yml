@@ -13,7 +13,7 @@ on:
         default: '24.04'
 
 env:
-  OPENSSH_SHA256_9.9p1: "b343fbcdbff87f15b1986e6e15d6d4fc9a7d36066be6b7fb507087ba8f966c02"
+  OPENSSH_SHA256_9_9p1: "b343fbcdbff87f15b1986e6e15d6d4fc9a7d36066be6b7fb507087ba8f966c02"
 
 jobs:
   build-deb:
@@ -30,11 +30,11 @@ jobs:
         run: |
           VERSION="${{ github.event.inputs.openssh_version || '9.9p1' }}"
           UBUNTU="${{ github.event.inputs.ubuntu_version || '24.04' }}"
-          SHA256_VAR="OPENSSH_SHA256_${VERSION}"
+          SHA256_VAR="OPENSSH_SHA256_${VERSION//./_}"
           SHA256="${!SHA256_VAR}"
           if [[ -z "$SHA256" ]]; then
             echo "::error::No SHA256 hash configured for OpenSSH $VERSION"
-            echo "Add OPENSSH_SHA256_${VERSION} to the workflow env section"
+            echo "Add OPENSSH_SHA256_${VERSION//./_} to the workflow env section"
             exit 1
           fi
           NUMERIC_VERSION="${VERSION%%p*}"
