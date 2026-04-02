@@ -13,9 +13,9 @@ build:
 
 # Clean generated files
 clean:
-	@echo "Cleaning..."
-	@git checkout -- uservin.sh 2>/dev/null || true
-	@echo "Done"
+	@echo "Removing generated uservin.sh..."
+	@rm -f uservin.sh
+	@echo "Done. Run 'make build' to regenerate."
 
 # Run all tests
 test:

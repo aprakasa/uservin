@@ -1,1 +1,24 @@
+# Environment and secrets
+.env
+
+# Test configuration
+test-config.ini
+
+# Git worktrees
 .worktrees/
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Temporary and log files
+*.log
+*.tmp
+*.bak
+
+# OS files
+.DS_Store
+Thumbs.db
