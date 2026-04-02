@@ -220,6 +220,17 @@ is_ubuntu_supported() {
     esac
 }
 
+# Get total system memory in GB
+get_mem_gb() {
+    if [[ -f /proc/meminfo ]]; then
+        local mem_kb
+        mem_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+        echo $((mem_kb / 1024 / 1024))
+    else
+        echo "0"
+    fi
+}
+
 # Get system specifications
 get_system_specs() {
     local specs=""
@@ -231,10 +242,8 @@ get_system_specs() {
     
     # Memory
     local mem_gb
-    if [[ -f /proc/meminfo ]]; then
-        mem_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
-        mem_gb=$((mem_kb / 1024 / 1024))
-    else
+    mem_gb=$(get_mem_gb)
+    if [[ "$mem_gb" -eq 0 ]]; then
         mem_gb="Unknown"
     fi
     specs+="RAM: ${mem_gb}GB\n"

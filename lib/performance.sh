@@ -4,8 +4,11 @@
 #
 
 SCRIPT_DIR="$(dirname "${BASH_SOURCE[0]}")"
+# shellcheck source=/dev/null
 source "$SCRIPT_DIR/utils.sh"
+# shellcheck source=/dev/null
 source "$SCRIPT_DIR/wizard.sh"
+# shellcheck source=/dev/null
 source "$SCRIPT_DIR/safety.sh"
 
 # Optimize system performance
@@ -14,15 +17,10 @@ optimize_performance() {
     log_info "Optimizing system performance..."
     
     # Detect system specs
-    local cpu_cores mem_kb mem_gb disk_type
+    local cpu_cores mem_gb disk_type
     cpu_cores=$(nproc 2>/dev/null || echo "1")
-    
-    if [[ -f /proc/meminfo ]]; then
-        mem_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
-        mem_gb=$((mem_kb / 1024 / 1024))
-    else
-        mem_gb=2
-    fi
+    mem_gb=$(get_mem_gb)
+    [[ "$mem_gb" -eq 0 ]] && mem_gb=2
     
     # Detect SSD by checking /sys/block/*/queue/rotational
     disk_type="HDD"
@@ -147,13 +145,9 @@ configure_swap() {
     fi
     
     # Detect RAM for swap sizing
-    local mem_kb mem_gb swap_size
-    if [[ -f /proc/meminfo ]]; then
-        mem_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
-        mem_gb=$((mem_kb / 1024 / 1024))
-    else
-        mem_gb=2
-    fi
+    local mem_gb swap_size
+    mem_gb=$(get_mem_gb)
+    [[ "$mem_gb" -eq 0 ]] && mem_gb=2
     
     # Determine swap size: 2GB default, adjust if RAM < 2GB
     if [[ $mem_gb -lt 2 ]]; then
@@ -213,13 +207,9 @@ configure_zram() {
     fi
     
     # Detect RAM for zram sizing
-    local mem_kb mem_gb zram_size
-    if [[ -f /proc/meminfo ]]; then
-        mem_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
-        mem_gb=$((mem_kb / 1024 / 1024))
-    else
-        mem_gb=2
-    fi
+    local mem_gb zram_size
+    mem_gb=$(get_mem_gb)
+    [[ "$mem_gb" -eq 0 ]] && mem_gb=2
     
     # Set size to 50% of RAM, minimum 512M
     local zram_mb=$((mem_gb * 1024 / 2))

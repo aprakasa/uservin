@@ -4,7 +4,9 @@
 #
 
 SCRIPT_DIR="$(dirname "${BASH_SOURCE[0]}")"
+# shellcheck source=/dev/null
 source "$SCRIPT_DIR/utils.sh"
+# shellcheck source=/dev/null
 source "$SCRIPT_DIR/wizard.sh"
 
 # Create admin user with sudo privileges
