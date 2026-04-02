@@ -55,11 +55,11 @@ get_config() {
 # Show welcome banner with ASCII art and feature list
 show_welcome() {
     echo -e "${CYAN}"
-    echo -e '  _   _                 _           _'
-    echo -e ' | | | | ___ _   _ _ __| | __ _ ___| |_'
-    echo -e ' | | | |/ __| | | | '"'"'__'"'"'| |/ \` / __| __|'
-    echo -e ' | |_| |\__ \ |_| | |  | | (_| \__ \ |_'
-    echo -e '  \___/ |___/\__,_|_|  |_|\__,_|___/\__|'
+    echo -e '                           _       '
+    echo -e '  _   _ ___  ___ _ ____   _(_)_ __  '
+    echo -e ' | | | / __|/ _ \ '"'"'__\ \ / / | '"'"'_ \ '
+    echo -e ' | |_| \__ \  __/ |   \ V /| | | | |'
+    echo -e '  \__,_|___/\___|_|    \_/ |_|_| |_|'
     echo -e "${NC}"
     echo -e "${BOLD}Ubuntu Server Provisioning Wizard${NC}"
     echo ""
@@ -89,10 +89,10 @@ run_wizard() {
     current_hostname=$(hostname 2>/dev/null || echo "ubuntu-server")
     while true; do
         CONFIG_HOSTNAME=$(prompt_input "Enter hostname" "$current_hostname")
-        if [[ -n "$CONFIG_HOSTNAME" && "$CONFIG_HOSTNAME" =~ ^[a-zA-Z0-9][-a-zA-Z0-9]*$ ]]; then
+        if [[ -n "$CONFIG_HOSTNAME" && "$CONFIG_HOSTNAME" =~ ^[a-zA-Z0-9]([-a-zA-Z0-9]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([-a-zA-Z0-9]*[a-zA-Z0-9])?)*$ ]]; then
             break
         fi
-        log_error "Invalid hostname. Use alphanumeric characters and hyphens only."
+        log_error "Invalid hostname. Use alphanumeric characters, hyphens, and dots (for FQDNs)."
     done
     log_success "Hostname set to: $CONFIG_HOSTNAME"
     
@@ -149,13 +149,8 @@ run_wizard() {
     
     # Step 7: Swap/Zram configuration (auto-detect based on RAM)
     local mem_gb
-    if [[ -f /proc/meminfo ]]; then
-        local mem_kb
-        mem_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
-        mem_gb=$((mem_kb / 1024 / 1024))
-    else
-        mem_gb=4  # Default assumption if we can't detect
-    fi
+    mem_gb=$(get_mem_gb)
+    [[ "$mem_gb" -eq 0 ]] && mem_gb=4
     
     log_info "Detected ${mem_gb}GB RAM"
     

@@ -4,13 +4,21 @@
 #
 
 SCRIPT_DIR="$(dirname "${BASH_SOURCE[0]}")"
+# shellcheck source=/dev/null
 source "$SCRIPT_DIR/utils.sh"
+# shellcheck source=/dev/null
 source "$SCRIPT_DIR/background.sh"
+# shellcheck source=/dev/null
 source "$SCRIPT_DIR/wizard.sh"
+# shellcheck source=/dev/null
 source "$SCRIPT_DIR/safety.sh"
+# shellcheck source=/dev/null
 source "$SCRIPT_DIR/system.sh"
+# shellcheck source=/dev/null
 source "$SCRIPT_DIR/security.sh"
+# shellcheck source=/dev/null
 source "$SCRIPT_DIR/user.sh"
+# shellcheck source=/dev/null
 source "$SCRIPT_DIR/performance.sh"
 
 # Display completion report
@@ -77,9 +85,9 @@ show_completion() {
     
     # Show backup and restore information
     echo "Backup Information:"
-    echo "  Backup Location: /root/uservin-backup-*"
-    echo "  Log File: /root/uservin-*.log"
-    echo "  Restore Command: /root/restore-uservin.sh"
+    echo "  Backup Location: /root/uservin-backups/"
+    echo "  Log File: /var/log/uservin/"
+    echo "  Restore Script: /root/uservin-backups/<timestamp>/restore.sh"
     if [[ -n "${LOG_FILE:-}" ]] && [[ -f "${LOG_FILE:-}" ]]; then
         echo "  Full Setup Log: $LOG_FILE"
     fi
@@ -120,7 +128,7 @@ show_completion() {
 
 # Execute all setup functions in order
 # Returns: 0 on success, 1 on critical failure
-te_setup() {
+execute_setup() {
     local critical_failed=false
     
     log_info "Starting server setup..."
@@ -303,7 +311,3 @@ te_setup() {
     return 0
 }
 
-# Alias for compatibility with test expectations
-execute_setup() {
-    te_setup "$@"
-}

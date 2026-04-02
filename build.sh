@@ -8,6 +8,14 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Read version from VERSION file
+if [[ -f "$SCRIPT_DIR/VERSION" ]]; then
+    BUILD_VERSION=$(tr -d '[:space:]' < "$SCRIPT_DIR/VERSION")
+else
+    echo "Error: VERSION file not found" >&2
+    exit 1
+fi
+
 # Source directory
 SRC_DIR="$SCRIPT_DIR"
 LIB_DIR="$SRC_DIR/lib"
@@ -22,7 +30,7 @@ trap 'rm -f "$TEMP_FILE"' EXIT
 echo "Building uservin.sh..."
 
 # Start with shebang and header
-cat > "$TEMP_FILE" << 'HEADER'
+cat > "$TEMP_FILE" << HEADER
 #!/bin/bash
 #
 # uservin.sh - Ubuntu Server Initialization Tool
@@ -34,7 +42,7 @@ cat > "$TEMP_FILE" << 'HEADER'
 set -euo pipefail
 
 # Script version
-readonly SCRIPT_VERSION="0.1.0"
+readonly SCRIPT_VERSION="${BUILD_VERSION}"
 
 # Configuration file path (can be overridden with --config)
 CONFIG_FILE=""
