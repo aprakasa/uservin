@@ -99,8 +99,14 @@ test_harden_ssh_dynamic_kex_no_mlkem() {
     local sshd_config="$TEST_DIR/etc/ssh/sshd_config"
 
     local kex_algorithms="curve25519-sha256@libssh.org,ecdh-sha2-nistp521,ecdh-sha2-nistp384,ecdh-sha2-nistp256,diffie-hellman-group-exchange-sha256"
-    if sshd -Q kex 2>/dev/null | grep -q "mlkem768x25519-sha256"; then
-        kex_algorithms="mlkem768x25519-sha256,$kex_algorithms"
+    local pq_algorithms=""
+    if sshd -T -o "kexalgorithms=+mlkem768x25519-sha256" 2>/dev/null | grep -q "mlkem768x25519-sha256"; then
+        pq_algorithms="mlkem768x25519-sha256"
+    elif sshd -Q kex 2>/dev/null | grep -q "mlkem768x25519-sha256"; then
+        pq_algorithms="mlkem768x25519-sha256"
+    fi
+    if [[ -n "$pq_algorithms" ]]; then
+        kex_algorithms="$pq_algorithms,$kex_algorithms"
     fi
 
     if [[ "$kex_algorithms" == "mlkem768x25519-sha256,"* ]]; then

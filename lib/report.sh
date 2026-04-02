@@ -55,7 +55,9 @@ show_completion() {
     echo "  ✓ System packages"
     echo "  ✓ Utilities"
     local openssh_label="  ✓ OpenSSH upgrade"
-    if sshd -Q kex 2>/dev/null | grep -q "mlkem768x25519-sha256"; then
+    if sshd -T -o "kexalgorithms=+mlkem768x25519-sha256" 2>/dev/null | grep -q "mlkem768x25519-sha256"; then
+        openssh_label="$openssh_label (post-quantum ML-KEM)"
+    elif sshd -Q kex 2>/dev/null | grep -q "mlkem768x25519-sha256"; then
         openssh_label="$openssh_label (post-quantum ML-KEM)"
     fi
     echo "$openssh_label"

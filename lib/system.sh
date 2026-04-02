@@ -13,7 +13,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/safety.sh"
 
 # OpenSSH target version for source compile
 readonly OPENSSH_TARGET_VERSION="9.9p1"
-readonly OPENSSH_SHA256="b343fbcdbff87f15b1b3c3e1b8c1c17d2c16b8918c765e0436d2a0ea3762772e"
+readonly OPENSSH_SHA256="b343fbcdbff87f15b1986e6e15d6d4fc9a7d36066be6b7fb507087ba8f966c02"
 
 # update_system() - Update system packages
 # Performs full system update including:
@@ -28,28 +28,24 @@ update_system() {
     # Set non-interactive mode for unattended operation
     export DEBIAN_FRONTEND=noninteractive
     
-    # Update package lists
-    log_verbose "Running apt-get update..."
+    log_info "Running apt-get update..."
     if ! execute_cmd "apt-get update -qq" "apt-get update"; then
         log_error "Failed to update package lists"
         return 1
     fi
     
-    # Upgrade installed packages
-    log_verbose "Running apt-get dist-upgrade..."
+    log_info "Running apt-get dist-upgrade..."
     if ! execute_cmd "apt-get dist-upgrade -y -qq" "apt-get dist-upgrade"; then
         log_error "Failed to upgrade packages"
         return 1
     fi
     
-    # Remove unnecessary packages
-    log_verbose "Removing unnecessary packages..."
+    log_info "Removing unnecessary packages..."
     if ! execute_cmd "apt-get autoremove --purge -y -qq" "apt-get autoremove --purge"; then
         log_warn "Failed to remove some unnecessary packages"
     fi
     
-    # Clean package cache
-    log_verbose "Cleaning package cache..."
+    log_info "Cleaning package cache..."
     if ! execute_cmd "apt-get clean" "apt-get clean"; then
         log_warn "Failed to clean package cache"
     fi
@@ -142,7 +138,9 @@ upgrade_openssh() {
             new_version=$(ssh -V 2>&1 | grep -oP 'OpenSSH_\K[0-9]+\.[0-9]+' || echo "unknown")
             log_success "OpenSSH upgraded to $new_version with post-quantum support"
             
-            if ssh -Q kex 2>/dev/null | grep -q mlkem; then
+            if sshd -T -o "kexalgorithms=+mlkem768x25519-sha256" 2>/dev/null | grep -q mlkem; then
+                log_success "ML-KEM post-quantum key exchange confirmed available"
+            elif ssh -Q kex 2>/dev/null | grep -q mlkem; then
                 log_success "ML-KEM post-quantum key exchange confirmed available"
             fi
         else

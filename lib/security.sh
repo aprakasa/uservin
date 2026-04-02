@@ -58,11 +58,22 @@ harden_ssh() {
     backup_file "$sshd_config"
     
     local kex_algorithms="curve25519-sha256@libssh.org,ecdh-sha2-nistp521,ecdh-sha2-nistp384,ecdh-sha2-nistp256,diffie-hellman-group-exchange-sha256"
-    if sshd -Q kex 2>/dev/null | grep -q "mlkem768x25519-sha256"; then
-        kex_algorithms="mlkem768x25519-sha256,$kex_algorithms"
+    local pq_algorithms=""
+    if sshd -T -o "kexalgorithms=+mlkem768x25519-sha256" 2>/dev/null | grep -q "mlkem768x25519-sha256"; then
+        pq_algorithms="mlkem768x25519-sha256"
         log_verbose "ML-KEM post-quantum key exchange available"
+    elif sshd -Q kex 2>/dev/null | grep -q "mlkem768x25519-sha256"; then
+        pq_algorithms="mlkem768x25519-sha256"
+        log_verbose "ML-KEM post-quantum key exchange available (via -Q)"
     else
         log_verbose "ML-KEM not available, using classical key exchange only"
+    fi
+    if sshd -T -o "kexalgorithms=+sntrup761x25519-sha512" 2>/dev/null | grep -q "sntrup761x25519-sha512"; then
+        pq_algorithms="${pq_algorithms:+$pq_algorithms,}sntrup761x25519-sha512,sntrup761x25519-sha512@openssh.com"
+        log_verbose "sntrup761 post-quantum key exchange available"
+    fi
+    if [[ -n "$pq_algorithms" ]]; then
+        kex_algorithms="$pq_algorithms,$kex_algorithms"
     fi
 
     # Create hardened configuration
