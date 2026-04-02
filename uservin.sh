@@ -1124,6 +1124,9 @@ load_config_file() {
 readonly OPENSSH_TARGET_VERSION="9.9p1"
 readonly OPENSSH_SHA256="b343fbcdbff87f15b1986e6e15d6d4fc9a7d36066be6b7fb507087ba8f966c02"
 
+# GitHub repo for pre-built OpenSSH .deb packages
+readonly OPENSSH_DEB_REPO="aprakasa/uservin"
+
 # update_system() - Update system packages
 # Performs full system update including:
 # - apt-get update
@@ -1239,7 +1242,17 @@ upgrade_openssh() {
         return 0
     fi
     
-    log_info "Repository doesn't have OpenSSH 9.7+, will compile from source"
+    log_info "Repository doesn't have OpenSSH 9.7+, trying pre-built package"
+
+    if [[ -f /etc/ssh/sshd_config ]]; then
+        backup_file /etc/ssh/sshd_config
+    fi
+
+    if download_openssh_deb; then
+        return 0
+    fi
+
+    log_info "Pre-built package not available, will compile from source"
     
     if compile_openssh_from_source; then
         if install_openssh_binaries; then
@@ -1398,6 +1411,62 @@ install_openssh_binaries() {
     execute_cmd "systemctl start ssh" "Starting ssh.service"
     
     log_success "OpenSSH binaries installed to system paths"
+    return 0
+}
+
+get_openssh_deb_filename() {
+    local arch
+    arch=$(dpkg-architecture -qDEB_BUILD_ARCH 2>/dev/null || echo "amd64")
+    local ubuntu_ver
+    ubuntu_ver=$(detect_ubuntu_version 2>/dev/null || echo "24.04")
+    echo "openssh-${OPENSSH_TARGET_VERSION}-ubuntu${ubuntu_ver}-${arch}.deb"
+}
+
+get_openssh_deb_url() {
+    local filename
+    filename=$(get_openssh_deb_filename)
+    local ubuntu_ver
+    ubuntu_ver=$(detect_ubuntu_version 2>/dev/null || echo "24.04")
+    local tag="openssh-${OPENSSH_TARGET_VERSION}-ubuntu${ubuntu_ver}"
+    echo "https://github.com/${OPENSSH_DEB_REPO}/releases/download/${tag}/${filename}"
+}
+
+download_openssh_deb() {
+    local deb_url
+    deb_url=$(get_openssh_deb_url)
+    local deb_file
+    deb_file=$(get_openssh_deb_filename)
+    local tmp_deb="/tmp/${deb_file}"
+
+    log_info "Trying pre-built OpenSSH package from GitHub Releases..."
+    print_header "OpenSSH Pre-built Package"
+
+    if ! execute_cmd "curl -fSL -o $tmp_deb $deb_url" "Downloading OpenSSH .deb package"; then
+        log_verbose "Pre-built package not available at $deb_url"
+        rm -f "$tmp_deb"
+        return 1
+    fi
+
+    log_info "Installing OpenSSH package..."
+    if ! execute_cmd "DEBIAN_FRONTEND=noninteractive dpkg -i $tmp_deb" "Installing OpenSSH .deb"; then
+        log_warn "dpkg install failed, attempting to fix dependencies..."
+        execute_cmd "DEBIAN_FRONTEND=noninteractive apt-get install -f -y -qq" "Fixing broken dependencies"
+        if ! execute_cmd "DEBIAN_FRONTEND=noninteractive dpkg -i $tmp_deb" "Retrying OpenSSH .deb install"; then
+            rm -f "$tmp_deb"
+            return 1
+        fi
+    fi
+
+    rm -f "$tmp_deb"
+
+    local new_version
+    new_version=$(ssh -V 2>&1 | grep -oP 'OpenSSH_\K[0-9]+\.[0-9]+' || echo "unknown")
+    log_success "OpenSSH installed to $new_version via pre-built package"
+
+    if sshd -T -o "kexalgorithms=+mlkem768x25519-sha256" 2>/dev/null | grep -q mlkem; then
+        log_success "ML-KEM post-quantum key exchange confirmed available"
+    fi
+
     return 0
 }
 
