@@ -1297,6 +1297,9 @@ compile_openssh_from_source() {
 
     mkdir -p "$build_dir"
 
+    log_verbose "Fixing any broken package state..."
+    execute_cmd "DEBIAN_FRONTEND=noninteractive apt-get install -f -y -qq" "Fixing broken dependencies"
+
     log_verbose "Installing build dependencies..."
     if ! execute_cmd "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq build-essential libssl-dev zlib1g-dev libpam0g-dev libkrb5-dev libedit-dev libselinux1-dev" "Installing build dependencies"; then
         log_error "Failed to install build dependencies"
@@ -1394,7 +1397,8 @@ install_openssh_binaries() {
     local sshd_session="/usr/local/libexec/sshd-session"
     if [[ -f "$sshd_session" ]]; then
         log_verbose "Installing sshd-session (required by OpenSSH 9.9+)"
-        install -m 755 "$sshd_session" /usr/lib/openssh/sshd-session || log_warn "Failed to install sshd-session"
+        mkdir -p /usr/libexec
+        install -m 755 "$sshd_session" /usr/libexec/sshd-session || log_warn "Failed to install sshd-session"
     fi
     
     log_verbose "Symlinking config and host keys..."
@@ -1437,6 +1441,7 @@ download_openssh_deb() {
     local deb_file
     deb_file=$(get_openssh_deb_filename)
     local tmp_deb="/tmp/${deb_file}"
+    local extract_dir="/tmp/openssh-deb"
 
     log_info "Trying pre-built OpenSSH package from GitHub Releases..."
     print_header "OpenSSH Pre-built Package"
@@ -1447,23 +1452,62 @@ download_openssh_deb() {
         return 1
     fi
 
-    log_info "Installing OpenSSH package..."
-    if ! execute_cmd "DEBIAN_FRONTEND=noninteractive dpkg --auto-deconfigure -i $tmp_deb" "Installing OpenSSH .deb"; then
-        log_warn "dpkg install failed, attempting to fix dependencies..."
-        execute_cmd "DEBIAN_FRONTEND=noninteractive apt-get install -f -y -qq" "Fixing broken dependencies"
-        if ! execute_cmd "DEBIAN_FRONTEND=noninteractive dpkg --auto-deconfigure -i $tmp_deb" "Retrying OpenSSH .deb install"; then
-            rm -f "$tmp_deb"
-            return 1
+    log_info "Extracting OpenSSH binaries from package..."
+    rm -rf "$extract_dir"
+    mkdir -p "$extract_dir"
+
+    if ! execute_cmd "dpkg-deb -x $tmp_deb $extract_dir" "Extracting .deb contents"; then
+        log_error "Failed to extract .deb package"
+        rm -f "$tmp_deb"
+        rm -rf "$extract_dir"
+        return 1
+    fi
+
+    log_info "Installing OpenSSH binaries to /usr/local..."
+    for binary in sshd ssh-keysign ssh-pkcs11-helper ssh-sk-helper; do
+        local src="$extract_dir/usr/sbin/$binary"
+        [[ ! -f "$src" ]] && src="$extract_dir/usr/libexec/$binary"
+        if [[ -f "$src" ]]; then
+            install -m 755 "$src" "/usr/local/sbin/$binary" || log_warn "Failed to install $binary"
         fi
+    done
+
+    for binary in ssh scp sftp ssh-keygen ssh-add ssh-agent ssh-keyscan; do
+        local src="$extract_dir/usr/bin/$binary"
+        if [[ -f "$src" ]]; then
+            install -m 755 "$src" "/usr/local/bin/$binary" || log_warn "Failed to install $binary"
+        fi
+    done
+
+    for binary in sftp-server ssh-keysign ssh-pkcs11-helper ssh-sk-helper; do
+        local src="$extract_dir/usr/libexec/$binary"
+        if [[ -f "$src" ]]; then
+            mkdir -p /usr/local/libexec
+            install -m 755 "$src" "/usr/local/libexec/$binary" || log_warn "Failed to install $binary"
+        fi
+    done
+
+    local sshd_session="$extract_dir/usr/libexec/sshd-session"
+    if [[ -f "$sshd_session" ]]; then
+        mkdir -p /usr/local/libexec
+        install -m 755 "$sshd_session" "/usr/local/libexec/sshd-session" || log_warn "Failed to install sshd-session"
+    fi
+
+    if ! install_openssh_binaries; then
+        log_warn "Failed to install OpenSSH binaries to system paths"
+        rm -f "$tmp_deb"
+        rm -rf "$extract_dir"
+        return 1
     fi
 
     rm -f "$tmp_deb"
+    rm -rf "$extract_dir"
 
     local new_version
     new_version=$(ssh -V 2>&1 | grep -oP 'OpenSSH_\K[0-9]+\.[0-9]+' || echo "unknown")
     log_success "OpenSSH installed to $new_version via pre-built package"
 
-    if sshd -T -o "kexalgorithms=+mlkem768x25519-sha256" 2>/dev/null | grep -q mlkem; then
+    if ssh -Q kex 2>/dev/null | grep -q mlkem; then
         log_success "ML-KEM post-quantum key exchange confirmed available"
     fi
 
@@ -1709,6 +1753,8 @@ EOF
     log_verbose "SSH configuration written successfully"
     
     mkdir -p /run/sshd
+    chmod 755 /run/sshd
+    chown root:root /run/sshd
     
     # Test configuration before applying
     log_verbose "Testing SSH configuration..."
@@ -1731,6 +1777,17 @@ EOF
             ssh_service="sshd"
         fi
         
+        if [[ -z "$ssh_service" ]] && pgrep -x sshd &>/dev/null; then
+            log_verbose "Found running sshd process, registering systemd service"
+            if [[ -f /lib/systemd/system/ssh.service ]]; then
+                systemctl enable ssh 2>/dev/null
+                ssh_service="ssh"
+            elif [[ -f /lib/systemd/system/sshd.service ]]; then
+                systemctl enable sshd 2>/dev/null
+                ssh_service="sshd"
+            fi
+        fi
+
         if [[ -n "$ssh_service" ]]; then
             if systemctl reload "$ssh_service" 2>/dev/null; then
                 log_success "SSH service reloaded (existing sessions preserved)"
