@@ -134,6 +134,8 @@ EOF
     log_verbose "SSH configuration written successfully"
     
     mkdir -p /run/sshd
+    chmod 755 /run/sshd
+    chown root:root /run/sshd
     
     # Test configuration before applying
     log_verbose "Testing SSH configuration..."
