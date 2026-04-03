@@ -1,51 +1,78 @@
 # uservin
 
-⚡ Ubuntu Server Initialization Tool - Secure your server in minutes, not hours.
+Ubuntu Server Initialization Tool - Automated the boring task.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Bash](https://img.shields.io/badge/bash-4.0%2B-blue.svg)](https://www.gnu.org/software/bash/)
 [![Tests](https://github.com/aprakasa/uservin/workflows/PR%20Checks/badge.svg)](https://github.com/aprakasa/uservin/actions)
+[![Tests: 74](https://img.shields.io/badge/tests-74%20passing-brightgreen.svg)](https://github.com/aprakasa/uservin/actions)
 
-**uservin** is a comprehensive Ubuntu server initialization script that automates security hardening, user management, system optimization, and intelligent configuration through an interactive wizard.
+**uservin** is a comprehensive Ubuntu server initialization script that automates security hardening, user management, system optimization, and post-quantum SSH key exchange.
 
 ---
 
-⚠️ **Note**: Always test on a non-production server first. Use `--dry-run` to preview changes.
-
 ## Features
 
-- 🎯 **One-Liner Install** - Single command setup: `wget -qO- URL | sudo bash`
-- 🧙 **Interactive Wizard** - Step-by-step configuration with sensible defaults
-- 🔒 **Security Hardening** - SSH key authentication, UFW firewall, fail2ban
-- 🧬 **Post-Quantum Crypto** - OpenSSH 9.9p1 compiled from source with ML-KEM key exchange
-- 🛡️ **Safety Features** - Dry-run mode, automatic backups, rollback capability
-- ⚡ **Performance Tuning** - BBR congestion control, Zram, sysctl optimization
-- 🤖 **Auto-Detection** - Detects RAM and recommends swap/Zram settings
-- 📝 **Comprehensive Logging** - All output saved to `/var/log/uservin/`
-- 🔄 **Auto-Updates** - Configurable automatic security updates
-- 🚀 **Background Execution** - Run and disconnect, setup continues automatically
-- 📊 **Status Tracking** - Check progress anytime with `--status`
+- **One-Liner Install** - Single command setup from GitHub Releases
+- **Post-Quantum SSH** - ML-KEM (Kyber) and sntrup761x25519 key exchange via OpenSSH 9.9p1
+- **Pre-Built Binaries** - Downloads pre-compiled OpenSSH `.deb` from GitHub Releases, falls back to source compile
+- **Interactive Wizard** - Step-by-step configuration with sensible defaults
+- **Config File Support** - Non-interactive setup via INI config file
+- **SSH Hardening** - Key-only auth, custom port, disabled root login, strengthened ciphers
+- **UFW Firewall** - Configured with SSH port and sensible defaults
+- **fail2ban** - Intrusion prevention out of the box
+- **Safety Features** - Dry-run mode, automatic backups, rollback on failure
+- **Performance Tuning** - BBR congestion control, Zram, sysctl optimization
+- **Auto-Detection** - Detects RAM and recommends swap/Zram settings
+- **Background Execution** - Auto-backgrounds in interactive terminals so you can disconnect
+- **Status Tracking** - Check progress anytime with `--status`
+- **Comprehensive Logging** - All output saved to `/var/log/uservin/`
+
+## Post-Quantum SSH
+
+uservin upgrades OpenSSH to 9.9p1 on systems running OpenSSH < 9.7, enabling post-quantum key exchange algorithms:
+
+| Algorithm | Type | Standard |
+|-----------|------|----------|
+| `mlkem768x25519-sha256` | ML-KEM (Kyber) hybrid | FIPS 203 |
+| `sntrup761x25519-sha512` | NTRU hybrid | Classical |
+
+### Upgrade Strategy (3-tier fallback)
+
+1. **apt upgrade** - If the system repository already has OpenSSH 9.7+
+2. **Pre-built .deb** - Downloads a pre-compiled `.deb` from [GitHub Releases](https://github.com/aprakasa/uservin/releases/tag/openssh-9.9p1-ubuntu24.04) and extracts binaries via `dpkg-deb -x` (no package manager conflicts)
+3. **Source compile** - Downloads OpenSSH 9.9p1 source, verifies SHA256, compiles with `--prefix=/usr`, and installs binaries to system paths
+
+The pre-built `.deb` packages are built via [GitHub Actions](.github/workflows/build-openssh.yml) on Ubuntu 24.04 with all dependencies.
+
+### Verifying PQ Key Exchange
+
+After setup, connect with verbose output to confirm:
+```bash
+ssh -v -p <port> <user>@<host>
+# Look for: kex: algorithm: mlkem768x25519-sha256
+```
 
 ## What's Configured
 
 ### System
 - Hostname and timezone configuration
 - Package updates (apt update/upgrade/dist-upgrade)
-- Essential packages installation
+- Essential packages installation (curl, git, htop, ufw, fail2ban, etc.)
 - System locale setup
+- Automatic security updates (unattended-upgrades)
 
 ### Security
-- OpenSSH upgrade from source (9.9p1+) for ML-KEM post-quantum key exchange
-- SSH hardening (custom port, disable root login, key-only auth)
+- OpenSSH upgrade with ML-KEM post-quantum key exchange (9.9p1)
+- SSH hardening (custom port, disable root login, key-only auth, strong ciphers)
 - UFW firewall with port configuration
 - fail2ban intrusion prevention
-- Automatic security updates
+- Post-quantum algorithms prepended in KexAlgorithms
 
 ### Users
 - Non-root admin user creation
 - SSH key authentication setup
-- Sudo privileges configuration
-- Passwordless sudo for admin
+- Sudo privileges with passwordless sudo
 
 ### Performance
 - Linux kernel BBR congestion control
@@ -55,30 +82,38 @@
 
 ## Requirements
 
-- **OS**: Ubuntu 20.04, 22.04, 24.04, or 24.10
-- **Access**: Root access (script must run as root)
-- **Network**: Internet connection for package installation
-- **SSH Key**: Valid SSH public key for user authentication
-- **Bash**: Version 4.0 or higher
-- **Build Tools**: Auto-installed for OpenSSH source compilation (build-essential, libssl-dev, etc.)
+| Component | Minimum | Recommended |
+|-----------|---------|-------------|
+| OS | Ubuntu 20.04 LTS | Ubuntu 24.04 LTS |
+| RAM | 512 MB | 1 GB+ |
+| Disk | 10 GB | 20 GB+ |
+| CPU | 1 core | 2+ cores |
+| Access | Root | Root |
+| Network | Internet | Internet |
+
+**Tested on**: Ubuntu 20.04, 22.04, 24.04
 
 ## Quick Start
 
-### One-Liner Install (Recommended)
+### One-Liner Install
 
 ```bash
 wget -qO- https://github.com/aprakasa/uservin/releases/latest/download/uservin.sh | sudo bash
 ```
 
-### Traditional Download
+### With Config File
 
 ```bash
 # Download
 curl -LO https://github.com/aprakasa/uservin/releases/latest/download/uservin.sh
 chmod +x uservin.sh
 
-# Run
-sudo ./uservin.sh
+# Create config (see config.example.ini)
+cp config.example.ini config.ini
+$EDITOR config.ini
+
+# Run with config
+sudo ./uservin.sh --config config.ini
 ```
 
 ### Build from Source
@@ -90,230 +125,145 @@ make build
 sudo ./uservin.sh
 ```
 
-## Usage Options
+## Usage
 
 ```bash
-# Dry run (preview changes without applying)
-sudo ./uservin.sh --dry-run
+sudo ./uservin.sh                  # Interactive wizard
+sudo ./uservin.sh --config c.ini   # Config file mode
+sudo ./uservin.sh --dry-run        # Preview changes
+sudo ./uservin.sh --verbose        # Detailed output
+sudo ./uservin.sh --quiet          # Errors only
+sudo ./uservin.sh --no-background  # Keep in foreground
+./uservin.sh --status              # Check progress
+./uservin.sh --help                # Show help
+```
 
-# Quiet mode (errors only)
-sudo ./uservin.sh --quiet
+## Config File
 
-# Verbose mode (detailed output)
-sudo ./uservin.sh --verbose
+Create an INI file to run non-interactively (see [`config.example.ini`](config.example.ini)):
 
-# Check background execution status
-./uservin.sh --status
+```ini
+[system]
+hostname = myserver
+timezone = Asia/Jakarta
 
-# Run in foreground (disable auto-background)
-sudo ./uservin.sh --no-background
+[user]
+username = admin
+ssh_key = ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... user@example.com
 
-# Show help
-./uservin.sh --help
+[ssh]
+port = 22
+
+[updates]
+auto_updates = true
+
+[performance]
+enable_swap = false
+enable_zram = true
+auto_detect = true
 ```
 
 ## Background Execution
 
-When you run uservin interactively with a config file, it automatically backgrounds itself so you can disconnect immediately. Setup continues in the background with full logging.
+When run interactively with a config file, uservin auto-backgrounds itself so you can disconnect immediately:
 
-### How It Works
-
-1. Run uservin with a config file (or after completing the wizard)
-2. The script detects an interactive terminal and auto-backgrounds itself
-3. You see the log file path and can disconnect immediately
-4. Check progress anytime with `--status` or `tail -f`
-
-### Example Output
-
-```
-uservin is now running in background.
-
-Log file: /var/log/uservin/uservin-20250401-143022-12345.log
-Status file: /var/log/uservin/status-20250401-143022-12345.json
-
-Check progress with:
-  tail -f /var/log/uservin/uservin-*.log
-
-Check status with:
-  uservin.sh --status
-```
-
-### Checking Progress
-
-Watch the log in real-time:
 ```bash
+sudo ./uservin.sh --config config.ini
+# Output:
+# uservin is now running in background.
+# Log file: /var/log/uservin/uservin-20250401-143022-12345.log
+
+# Check progress
 tail -f /var/log/uservin/uservin-*.log
-```
-
-Or check the status summary:
-```bash
 ./uservin.sh --status
-```
-
-### Status Command
-
-`--status` shows the current or most recent run:
-
-```
-========================================
-   uservin Status
-========================================
-
-Run: 20250401-143022-12345
-Status: running
-Started: 2025-04-01T14:30:22+07:00
-Message: Configuring security...
-PID: 12345
-
-Process is currently running.
-
-Log file: /var/log/uservin/uservin-20250401-143022-12345.log
 ```
 
 ### Foreground Mode
 
-To keep the script in the foreground (e.g., for debugging or CI/CD):
+For debugging or CI/CD, keep the script in the foreground:
 ```bash
 sudo ./uservin.sh --no-background
 ```
 
-### Log Files
+### Running on a Remote Server
 
-All output is saved to `/var/log/uservin/` with timestamped filenames:
-
-| File | Description |
-|------|-------------|
-| `uservin-YYYYMMDD-HHMMSS-PID.log` | Full execution log |
-| `status-YYYYMMDD-HHMMSS-PID.json` | Machine-readable status |
-| `pid-YYYYMMDD-HHMMSS-PID.pid` | Process ID file |
-
-## Interactive Wizard
-
-The wizard guides you through:
-1. **Hostname** - Set server hostname
-2. **Timezone** - Configure system timezone
-3. **Admin User** - Create non-root user with sudo
-4. **SSH Port** - Change from default 22 (optional)
-5. **SSH Key** - Add your public key
-6. **Auto-Updates** - Enable automatic security updates
-7. **Swap/Zram** - Configure based on your RAM:
-   - < 4GB RAM: Enable both Zram + Swap
-   - 4-8GB RAM: Enable Zram only
-   - > 8GB RAM: Your choice
-8. **Confirmation** - Review summary before applying
+Since SSH configuration changes may disconnect your session:
+```bash
+nohup ./uservin.sh --config config.ini --no-background > /tmp/uservin-output.log 2>&1 &
+```
 
 ## Safety Features
 
-### Pre-flight Checks
-- Ubuntu version validation (20.04/22.04/24.04/24.10)
-- Root access verification
-- Required tools availability
-- Internet connectivity test
-- Disk space verification
-- SSH key validation
-
-### Backup System
-- Automatic backup of all modified files
-- Backup location: `/root/uservin-backups/YYYY-MM-DD_HH-MM-SS/`
-- Timestamped for easy restoration
-- Restore script auto-generated
-
-### Rollback
-- Automatic rollback on critical failures
-- Trap-based cleanup on script interruption
-- Manual rollback anytime via restore script
+- **Pre-flight checks** - Ubuntu version, root access, disk space, internet connectivity
+- **Automatic backups** - All modified files backed up to `/root/uservin-backups/`
+- **Rollback** - Automatic rollback on critical failures; trap-based cleanup on interruption
+- **Dry-run mode** - Preview all changes without applying them
 
 ## Project Structure
 
 ```
 uservin/
-├── uservin.sh          # Bundled single-file script (generated)
-├── lib/                # Modular library files
-│   ├── utils.sh        # Logging, validation, helpers
-│   ├── safety.sh       # Backup, rollback, preflight
-│   ├── wizard.sh       # Interactive configuration
-│   ├── system.sh       # System updates, packages
-│   ├── security.sh     # SSH hardening, firewall
-│   ├── user.sh         # User creation, SSH keys
-│   ├── performance.sh  # BBR, Zram, swap
-│   └── report.sh       # Setup orchestration
-├── tests/              # Test suite
-├── build.sh            # Build script
-└── Makefile            # Build automation
+├── uservin.sh              # Bundled single-file script (generated by make build)
+├── lib/                    # Modular library files
+│   ├── utils.sh            # Logging, validation, helpers
+│   ├── safety.sh           # Backup, rollback, preflight checks
+│   ├── wizard.sh           # Interactive wizard, config file parsing
+│   ├── system.sh           # System updates, OpenSSH upgrade/compile
+│   ├── security.sh         # SSH hardening, UFW, fail2ban
+│   ├── user.sh             # User creation, SSH keys
+│   ├── performance.sh      # BBR, Zram, swap
+│   ├── background.sh       # Auto-background execution
+│   └── report.sh           # Setup orchestration, completion report
+├── tests/                  # Test suite (74 tests)
+├── .github/workflows/      # CI/CD
+│   ├── build-openssh.yml   # Build pre-compiled OpenSSH .deb
+│   ├── pr-checks.yml       # PR validation
+│   ├── auto-build.yml      # Auto-rebuild uservin.sh
+│   ├── release.yml         # Release automation
+│   └── scheduled.yml       # Weekly tests
+├── build.sh                # Build script
+├── Makefile                # Build automation
+├── config.example.ini      # Example configuration
+└── VERSION                 # Version (single source of truth)
 ```
 
 ## Development
 
-### Build the Bundled Script
-
 ```bash
-make build    # Generate uservin.sh from lib files
-make test     # Run all tests
-make clean    # Restore original files
+make build    # Bundle lib/ files into uservin.sh
+make test     # Run 74 tests
 make lint     # Run shellcheck
-```
-
-### Running Tests
-
-```bash
-cd tests
-./runner.sh
+make clean    # Remove generated files
 ```
 
 ### Contributing
 
 1. Fork the repository
 2. Create a feature branch: `git checkout -b feature/my-feature`
-3. Make your changes to `lib/` files
-4. Run `make build` to regenerate `uservin.sh`
-5. Run tests: `make test`
-6. Commit with conventional commits
-7. Push and submit a PR
-
-## CI/CD
-
-This project uses GitHub Actions for:
-- **PR Checks** - Tests, shellcheck, build verification
-- **Auto-Build** - Regenerates `uservin.sh` on lib changes
-- **Releases** - Attaches bundled script to releases
-- **Scheduled Tests** - Weekly testing on multiple Ubuntu versions
+3. Edit files in `lib/` (not `uservin.sh` - it's auto-generated)
+4. Run `make build && make test`
+5. Commit with [conventional commits](https://www.conventionalcommits.org/)
+6. Push and submit a PR
 
 ## Troubleshooting
 
 ### Lost SSH Connection
-Wait 2-3 minutes and reconnect with your new SSH port:
+Wait 2-3 minutes, then reconnect with your configured port:
 ```bash
 ssh -p <port> <username>@<hostname>
 ```
 
 ### Check Logs
 ```bash
-# Latest log
 sudo tail -f /var/log/uservin/uservin-*.log
-
-# Or check status
 ./uservin.sh --status
 ```
 
-### Port Already in Use
-```bash
-sudo ss -tlnp | grep <port>
-# Choose different port (1024-65535), avoid: 80, 443, 3306
-```
-
-## System Requirements
-
-| Component | Minimum | Recommended |
-|-----------|---------|-------------|
-| RAM | 512 MB | 1 GB+ |
-| Disk | 10 GB | 20 GB+ |
-| CPU | 1 core | 2+ cores |
-| Network | 1 Mbps | 10 Mbps+ |
-
-## Tested On
-
-- **Ubuntu**: 20.04 LTS, 22.04 LTS, 24.04 LTS, 24.10
-- **Cloud**: DigitalOcean, AWS EC2, GCP, Linode, Vultr, Hetzner
+### OpenSSH Compile Failed
+The script tries pre-built binaries first. If source compile also fails:
+- Check `/tmp/openssh-build/` for build logs
+- Ensure `build-essential` and `libssl-dev` are available
+- Run `apt-get install -f -y` to fix broken dependencies
 
 ## License
 
