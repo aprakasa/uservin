@@ -188,6 +188,9 @@ compile_openssh_from_source() {
 
     mkdir -p "$build_dir"
 
+    log_verbose "Fixing any broken package state..."
+    execute_cmd "DEBIAN_FRONTEND=noninteractive apt-get install -f -y -qq" "Fixing broken dependencies"
+
     log_verbose "Installing build dependencies..."
     if ! execute_cmd "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq build-essential libssl-dev zlib1g-dev libpam0g-dev libkrb5-dev libedit-dev libselinux1-dev" "Installing build dependencies"; then
         log_error "Failed to install build dependencies"
