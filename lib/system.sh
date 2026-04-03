@@ -285,7 +285,8 @@ install_openssh_binaries() {
     local sshd_session="/usr/local/libexec/sshd-session"
     if [[ -f "$sshd_session" ]]; then
         log_verbose "Installing sshd-session (required by OpenSSH 9.9+)"
-        install -m 755 "$sshd_session" /usr/lib/openssh/sshd-session || log_warn "Failed to install sshd-session"
+        mkdir -p /usr/libexec
+        install -m 755 "$sshd_session" /usr/libexec/sshd-session || log_warn "Failed to install sshd-session"
     fi
     
     log_verbose "Symlinking config and host keys..."
