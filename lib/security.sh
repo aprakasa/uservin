@@ -158,6 +158,17 @@ EOF
             ssh_service="sshd"
         fi
         
+        if [[ -z "$ssh_service" ]] && pgrep -x sshd &>/dev/null; then
+            log_verbose "Found running sshd process, registering systemd service"
+            if [[ -f /lib/systemd/system/ssh.service ]]; then
+                systemctl enable ssh 2>/dev/null
+                ssh_service="ssh"
+            elif [[ -f /lib/systemd/system/sshd.service ]]; then
+                systemctl enable sshd 2>/dev/null
+                ssh_service="sshd"
+            fi
+        fi
+
         if [[ -n "$ssh_service" ]]; then
             if systemctl reload "$ssh_service" 2>/dev/null; then
                 log_success "SSH service reloaded (existing sessions preserved)"
