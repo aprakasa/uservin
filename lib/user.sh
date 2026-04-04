@@ -85,7 +85,7 @@ create_admin_user() {
     
     # Save credentials to log file if set
     if [[ -n "$LOG_FILE" ]]; then
-        echo "$(date '+%Y-%m-%d %H:%M:%S') USER CREATED: username=$username password=$password" >> "$LOG_FILE"
+        echo "$(date '+%Y-%m-%d %H:%M:%S') USER CREATED: username=$username (password displayed on screen only)" >> "$LOG_FILE"
     fi
     
     log_warn "Please change the password after first login!"
