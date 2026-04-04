@@ -45,6 +45,12 @@ backup_file() {
         log_warn "Cannot backup non-existent file: $file"
         return 0
     fi
+
+    # Reject symlinks to prevent symlink-based attacks
+    if [[ -L "$file" ]]; then
+        log_warn "Skipping symlink backup: $file"
+        return 0
+    fi
     
     # Check if backup directory is initialized
     if [[ -z "$BACKUP_DIR" ]]; then
@@ -63,6 +69,12 @@ backup_file() {
         ((counter++))
     done
     
+    # Verify backup destination is not a symlink (possible attack)
+    if [[ -L "$backup_path" ]]; then
+        log_error "Backup destination is a symlink (possible attack): $backup_path"
+        return 1
+    fi
+
     # Copy file to backup
     if cp "$file" "$backup_path"; then
         BACKUP_FILES+=("$file|$backup_path")
