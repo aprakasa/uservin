@@ -93,6 +93,7 @@ validate_ssh_key() {
 init_logging() {
     if [[ -n "$LOG_FILE" ]]; then
         >"$LOG_FILE"
+        chmod 600 "$LOG_FILE"
     fi
 }
 
@@ -181,7 +182,7 @@ execute_cmd() {
         return 0
     fi
     
-    if eval "$cmd"; then
+    if bash -c "$cmd"; then
         log_verbose "Successfully executed: $description"
         return 0
     else
@@ -511,6 +512,12 @@ backup_file() {
         log_warn "Cannot backup non-existent file: $file"
         return 0
     fi
+
+    # Reject symlinks to prevent symlink-based attacks
+    if [[ -L "$file" ]]; then
+        log_warn "Skipping symlink backup: $file"
+        return 0
+    fi
     
     # Check if backup directory is initialized
     if [[ -z "$BACKUP_DIR" ]]; then
@@ -529,6 +536,12 @@ backup_file() {
         ((counter++))
     done
     
+    # Verify backup destination is not a symlink (possible attack)
+    if [[ -L "$backup_path" ]]; then
+        log_error "Backup destination is a symlink (possible attack): $backup_path"
+        return 1
+    fi
+
     # Copy file to backup
     if cp "$file" "$backup_path"; then
         BACKUP_FILES+=("$file|$backup_path")
@@ -2120,11 +2133,13 @@ create_admin_user() {
         
         if [[ "$DRY_RUN" == "true" ]]; then
             echo -e "${YELLOW}[DRY-RUN]${NC} Would ask to continue with existing user"
-        else
+        elif [[ -t 0 ]]; then
             if ! prompt_yesno "Continue with existing user '$username'?" "y"; then
                 log_info "Skipping user creation"
                 return 0
             fi
+        else
+            log_info "Non-interactive mode: continuing with existing user '$username'"
         fi
         
         # Add to groups even if user exists (in case they were removed)
@@ -2174,7 +2189,7 @@ create_admin_user() {
     
     # Save credentials to log file if set
     if [[ -n "$LOG_FILE" ]]; then
-        echo "$(date '+%Y-%m-%d %H:%M:%S') USER CREATED: username=$username password=$password" >> "$LOG_FILE"
+        echo "$(date '+%Y-%m-%d %H:%M:%S') USER CREATED: username=$username (password displayed on screen only)" >> "$LOG_FILE"
     fi
     
     log_warn "Please change the password after first login!"
@@ -2217,7 +2232,7 @@ setup_ssh_keys() {
     
     # Get user's home directory
     local home_dir
-    home_dir=$(eval echo "~$username")
+    home_dir=$(getent passwd "$username" | cut -d: -f6)
     
     if [[ -z "$home_dir" ]] || [[ ! -d "$home_dir" ]]; then
         log_error "Home directory not found for user: $username"
@@ -2235,8 +2250,16 @@ setup_ssh_keys() {
         log_verbose "Created .ssh directory: $ssh_dir"
     fi
     
-    # Append SSH key to authorized_keys
-    echo "$ssh_key" >> "$auth_keys"
+    # Check for duplicate key before appending
+    if [[ -f "$auth_keys" ]] && grep -qF "$ssh_key" "$auth_keys"; then
+        log_warn "SSH key already exists in authorized_keys, skipping"
+    else
+        # Ensure file ends with newline before appending
+        if [[ -s "$auth_keys" ]] && [[ "$(tail -c1 "$auth_keys" | wc -l)" -eq 0 ]]; then
+            echo "" >> "$auth_keys"
+        fi
+        echo "$ssh_key" >> "$auth_keys"
+    fi
     
     # Set permissions
     chmod 600 "$auth_keys"
