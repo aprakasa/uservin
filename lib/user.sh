@@ -31,11 +31,13 @@ create_admin_user() {
         
         if [[ "$DRY_RUN" == "true" ]]; then
             echo -e "${YELLOW}[DRY-RUN]${NC} Would ask to continue with existing user"
-        else
+        elif [[ -t 0 ]]; then
             if ! prompt_yesno "Continue with existing user '$username'?" "y"; then
                 log_info "Skipping user creation"
                 return 0
             fi
+        else
+            log_info "Non-interactive mode: continuing with existing user '$username'"
         fi
         
         # Add to groups even if user exists (in case they were removed)
