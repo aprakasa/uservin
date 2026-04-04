@@ -146,8 +146,16 @@ setup_ssh_keys() {
         log_verbose "Created .ssh directory: $ssh_dir"
     fi
     
-    # Append SSH key to authorized_keys
-    echo "$ssh_key" >> "$auth_keys"
+    # Check for duplicate key before appending
+    if [[ -f "$auth_keys" ]] && grep -qF "$ssh_key" "$auth_keys"; then
+        log_warn "SSH key already exists in authorized_keys, skipping"
+    else
+        # Ensure file ends with newline before appending
+        if [[ -s "$auth_keys" ]] && [[ "$(tail -c1 "$auth_keys" | wc -l)" -eq 0 ]]; then
+            echo "" >> "$auth_keys"
+        fi
+        echo "$ssh_key" >> "$auth_keys"
+    fi
     
     # Set permissions
     chmod 600 "$auth_keys"
