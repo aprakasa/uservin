@@ -60,6 +60,7 @@ validate_ssh_key() {
 init_logging() {
     if [[ -n "$LOG_FILE" ]]; then
         >"$LOG_FILE"
+        chmod 600 "$LOG_FILE"
     fi
 }
 
