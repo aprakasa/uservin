@@ -128,7 +128,7 @@ setup_ssh_keys() {
     
     # Get user's home directory
     local home_dir
-    home_dir=$(eval echo "~$username")
+    home_dir=$(getent passwd "$username" | cut -d: -f6)
     
     if [[ -z "$home_dir" ]] || [[ ! -d "$home_dir" ]]; then
         log_error "Home directory not found for user: $username"
