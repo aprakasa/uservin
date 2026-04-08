@@ -27,7 +27,7 @@ Setting up a new Ubuntu server involves the same repetitive steps: update packag
 flowchart TD
     A["<b>uservin</b><br/><i>Run with --config or wizard</i>"] --> B{Preflight Checks}
     B -->|"Ubuntu? Root? Disk? Network?"| C{Backup Config}
-    C --> D["<b>System Setup</b><br/>Hostname · Timezone · apt upgrade<br/>Locale · Essential packages"]
+    C --> D["<b>System Setup</b><br/>Hostname · Timezone · apt upgrade<br/>Essential packages"]
     D --> E{OpenSSH ≥ 9.7?}
     E -->|Yes| F["<b>Security Hardening</b><br/>SSH config · UFW · fail2ban"]
     E -->|No| G{apt has 9.7+?}
@@ -36,7 +36,7 @@ flowchart TD
     H -->|Download| F
     H -->|Not found| I["Source compile 9.9p1"]
     I --> F
-    F --> J["<b>User Setup</b><br/>Create admin · SSH keys<br/>Passwordless sudo"]
+    F --> J["<b>User Setup</b><br/>Create admin · SSH keys"]
     J --> K["<b>Performance Tuning</b><br/>BBR · Zram · Swap<br/>Sysctl optimization"]
     K --> L["<b>Completion Report</b><br/>Summary & next steps"]
 
@@ -103,7 +103,6 @@ ssh -v -p <port> <user>@<host>
 - Hostname and timezone configuration
 - Package updates (`apt update` / `upgrade` / `dist-upgrade`)
 - Essential packages installation (curl, git, htop, ufw, fail2ban, etc.)
-- System locale setup
 - Automatic security updates (unattended-upgrades)
 
 ### Security
@@ -116,7 +115,7 @@ ssh -v -p <port> <user>@<host>
 ### Users
 - Non-root admin user creation
 - SSH key authentication setup
-- Sudo privileges with passwordless sudo
+- Sudo privileges
 
 ### Performance
 - Linux kernel BBR congestion control
@@ -201,7 +200,6 @@ auto_updates = true
 [performance]
 enable_swap = false
 enable_zram = true
-auto_detect = true
 ```
 
 ## Background Execution

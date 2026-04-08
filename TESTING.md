@@ -515,7 +515,7 @@ ls -la /root/uservin-backups/
 # Expected: Directory exists with timestamped backups
 
 # Verify backup contents
-tar -tzf /root/uservin-backups/backup-<timestamp>.tar.gz
+ls -la /root/uservin-backups/*/
 # Expected: Contains original config files
 ```
 
