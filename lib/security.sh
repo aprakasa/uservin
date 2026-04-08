@@ -59,13 +59,15 @@ harden_ssh() {
     
     local kex_algorithms="curve25519-sha256@libssh.org,ecdh-sha2-nistp521,ecdh-sha2-nistp384,ecdh-sha2-nistp256,diffie-hellman-group-exchange-sha256"
     local pq_algorithms=""
-    if ssh -Q kex 2>/dev/null | grep -q "mlkem768x25519-sha256"; then
+    local available_kex
+    available_kex=$(ssh -Q kex 2>/dev/null)
+    if echo "$available_kex" | grep -q "mlkem768x25519-sha256"; then
         pq_algorithms="mlkem768x25519-sha256"
         log_verbose "ML-KEM post-quantum key exchange available"
     else
         log_verbose "ML-KEM not available, using classical key exchange only"
     fi
-    if ssh -Q kex 2>/dev/null | grep -q "sntrup761x25519-sha512"; then
+    if echo "$available_kex" | grep -q "sntrup761x25519-sha512"; then
         pq_algorithms="${pq_algorithms:+$pq_algorithms,}sntrup761x25519-sha512,sntrup761x25519-sha512@openssh.com"
         log_verbose "sntrup761 post-quantum key exchange available"
     fi
@@ -227,8 +229,10 @@ configure_ufw() {
         return 1
     fi
     
-    # Reset UFW to defaults
+    # Reset UFW to defaults (save existing rules first)
     log_verbose "Resetting UFW to defaults..."
+    local ufw_backup_rules="/tmp/ufw-rules-backup.$(date +%s).rules"
+    ufw status verbose > "$ufw_backup_rules" 2>/dev/null || true
     echo "y" | ufw reset &>/dev/null
     
     # Set default policies
