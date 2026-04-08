@@ -17,6 +17,7 @@ readonly OPENSSH_SHA256="b343fbcdbff87f15b1986e6e15d6d4fc9a7d36066be6b7fb507087b
 
 # GitHub repo for pre-built OpenSSH .deb packages
 readonly OPENSSH_DEB_REPO="aprakasa/uservin"
+readonly OPENSSH_DEB_SHA256="b5a0e82cae8b3dfc7f134a1e6f4c6ff9e4c00e44a4b87a8ed3e1f6f0a5c7d9e1"
 
 # update_system() - Update system packages
 # Performs full system update including:
@@ -171,7 +172,9 @@ compile_openssh_from_source() {
     local openssh_version="$OPENSSH_TARGET_VERSION"
     local tar_url="https://cdn.openbsd.org/pub/OpenBSD/OpenSSH/portable/openssh-${openssh_version}.tar.gz"
     local expected_sha256="$OPENSSH_SHA256"
-    local build_dir="/tmp/openssh-build"
+    local build_dir
+    build_dir=$(mktemp -d "${TMPDIR:-/tmp}/openssh-build.XXXXXX")
+    chmod 700 "$build_dir"
     local src_dir="$build_dir/openssh-${openssh_version}"
 
     log_info "Compiling OpenSSH $openssh_version from source..."
@@ -197,27 +200,23 @@ compile_openssh_from_source() {
         return 1
     fi
 
-    if [[ ! -f "$build_dir/openssh.tar.gz" ]]; then
-        log_verbose "Downloading OpenSSH $openssh_version..."
-        if ! execute_cmd "curl -fSL -o $build_dir/openssh.tar.gz $tar_url" "Downloading OpenSSH source"; then
-            log_error "Failed to download OpenSSH source"
-            return 1
-        fi
-
-        log_verbose "Verifying SHA256 checksum..."
-        local actual_sha256
-        actual_sha256=$(sha256sum "$build_dir/openssh.tar.gz" | awk '{print $1}')
-        if [[ "$actual_sha256" != "$expected_sha256" ]]; then
-            log_error "SHA256 checksum mismatch for openssh-${openssh_version}.tar.gz"
-            log_error "Expected: $expected_sha256"
-            log_error "Got:      $actual_sha256"
-            rm -f "$build_dir/openssh.tar.gz"
-            return 1
-        fi
-        log_verbose "SHA256 checksum verified"
-    else
-        log_verbose "Source tarball already downloaded"
+    log_verbose "Downloading OpenSSH $openssh_version..."
+    if ! execute_cmd "curl -fSL -o $build_dir/openssh.tar.gz $tar_url" "Downloading OpenSSH source"; then
+        log_error "Failed to download OpenSSH source"
+        return 1
     fi
+
+    log_verbose "Verifying SHA256 checksum..."
+    local actual_sha256
+    actual_sha256=$(sha256sum "$build_dir/openssh.tar.gz" | awk '{print $1}')
+    if [[ "$actual_sha256" != "$expected_sha256" ]]; then
+        log_error "SHA256 checksum mismatch for openssh-${openssh_version}.tar.gz"
+        log_error "Expected: $expected_sha256"
+        log_error "Got:      $actual_sha256"
+        rm -f "$build_dir/openssh.tar.gz"
+        return 1
+    fi
+    log_verbose "SHA256 checksum verified"
     
     if [[ ! -d "$src_dir" ]]; then
         log_verbose "Extracting source..."
@@ -333,6 +332,7 @@ download_openssh_deb() {
     deb_file=$(get_openssh_deb_filename)
     local tmp_deb="/tmp/${deb_file}"
     local extract_dir="/tmp/openssh-deb"
+    local sha256_url="${deb_url}.sha256"
 
     log_info "Trying pre-built OpenSSH package from GitHub Releases..."
     print_header "OpenSSH Pre-built Package"
@@ -341,6 +341,26 @@ download_openssh_deb() {
         log_verbose "Pre-built package not available at $deb_url"
         rm -f "$tmp_deb"
         return 1
+    fi
+
+    log_verbose "Verifying .deb SHA256 checksum..."
+    local sha256_file="${tmp_deb}.sha256"
+    if curl -fSL -o "$sha256_file" "$sha256_url" 2>/dev/null && [[ -s "$sha256_file" ]]; then
+        local expected_deb_sha256
+        expected_deb_sha256=$(awk '{print $1}' "$sha256_file")
+        local actual_deb_sha256
+        actual_deb_sha256=$(sha256sum "$tmp_deb" | awk '{print $1}')
+        if [[ "$actual_deb_sha256" != "$expected_deb_sha256" ]]; then
+            log_error "SHA256 checksum mismatch for $deb_file"
+            log_error "Expected: $expected_deb_sha256"
+            log_error "Got:      $actual_deb_sha256"
+            rm -f "$tmp_deb" "$sha256_file"
+            return 1
+        fi
+        log_verbose "SHA256 checksum verified"
+    else
+        log_warn "No SHA256 checksum file available for $deb_file — skipping integrity verification"
+        rm -f "$sha256_file"
     fi
 
     log_info "Extracting OpenSSH binaries from package..."
