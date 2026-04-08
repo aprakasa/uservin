@@ -72,3 +72,29 @@ test_validate_username_too_long() {
         assert_true "true" "Long username should be rejected"
     fi
 }
+
+# Test: Hostname validation pattern accepts valid hostnames
+test_validate_hostname_valid() {
+    local valid_hostnames=("myserver" "srv.example.com" "web-01" "a" "server01.local" "A" "MyServer")
+    local all_passed=true
+    for hn in "${valid_hostnames[@]}"; do
+        if [[ ! "$hn" =~ ^[a-zA-Z0-9]([-a-zA-Z0-9]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([-a-zA-Z0-9]*[a-zA-Z0-9])?)*$ ]]; then
+            echo "  FAIL: Hostname '$hn' should be valid"
+            all_passed=false
+        fi
+    done
+    assert_true "$all_passed" "All valid hostnames should pass"
+}
+
+# Test: Hostname validation pattern rejects invalid hostnames
+test_validate_hostname_invalid() {
+    local invalid_hostnames=("-server" "server-" "my server" "srv..example" "" "server!" "my_server")
+    local all_passed=true
+    for hn in "${invalid_hostnames[@]}"; do
+        if [[ "$hn" =~ ^[a-zA-Z0-9]([-a-zA-Z0-9]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([-a-zA-Z0-9]*[a-zA-Z0-9])?)*$ ]]; then
+            echo "  FAIL: Hostname '$hn' should be invalid"
+            all_passed=false
+        fi
+    done
+    assert_true "$all_passed" "All invalid hostnames should be rejected"
+}

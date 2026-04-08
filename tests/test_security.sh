@@ -52,7 +52,6 @@ teardown() {
 test_harden_ssh_function_exists() {
     setup
     
-    # Verify the function exists
     if type harden_ssh &>/dev/null; then
         assert_true "true" "harden_ssh function exists"
     else
@@ -66,7 +65,6 @@ test_harden_ssh_function_exists() {
 test_configure_ufw_function_exists() {
     setup
     
-    # Verify the function exists
     if type configure_ufw &>/dev/null; then
         assert_true "true" "configure_ufw function exists"
     else
@@ -80,7 +78,6 @@ test_configure_ufw_function_exists() {
 test_configure_fail2ban_function_exists() {
     setup
     
-    # Verify the function exists
     if type configure_fail2ban &>/dev/null; then
         assert_true "true" "configure_fail2ban function exists"
     else
@@ -96,13 +93,11 @@ test_harden_ssh_dynamic_kex_no_mlkem() {
     mkdir -p "$TEST_DIR/etc/ssh"
     cp /etc/ssh/ssh_host_*_key "$TEST_DIR/etc/ssh/" 2>/dev/null || true
 
-    local sshd_config="$TEST_DIR/etc/ssh/sshd_config"
-
     local kex_algorithms="curve25519-sha256@libssh.org,ecdh-sha2-nistp521,ecdh-sha2-nistp384,ecdh-sha2-nistp256,diffie-hellman-group-exchange-sha256"
     local pq_algorithms=""
-    if sshd -T -o "kexalgorithms=+mlkem768x25519-sha256" 2>/dev/null | grep -q "mlkem768x25519-sha256"; then
-        pq_algorithms="mlkem768x25519-sha256"
-    elif sshd -Q kex 2>/dev/null | grep -q "mlkem768x25519-sha256"; then
+    local available_kex
+    available_kex=$(ssh -Q kex 2>/dev/null)
+    if echo "$available_kex" | grep -q "mlkem768x25519-sha256"; then
         pq_algorithms="mlkem768x25519-sha256"
     fi
     if [[ -n "$pq_algorithms" ]]; then
@@ -110,9 +105,7 @@ test_harden_ssh_dynamic_kex_no_mlkem() {
     fi
 
     if [[ "$kex_algorithms" == "mlkem768x25519-sha256,"* ]]; then
-        assert_true "true" "ML-KEM detected when available"
-    else
-        assert_true "true" "KEX falls back gracefully without ML-KEM"
+        assert_contains "$kex_algorithms" "mlkem768x25519-sha256" "ML-KEM should be first when available"
     fi
 
     assert_contains "$kex_algorithms" "curve25519-sha256" "KEX includes curve25519"
@@ -136,12 +129,24 @@ test_disable_ssh_socket_function_exists() {
 test_configure_auto_updates_function_exists() {
     setup
     
-    # Verify the function exists
     if type configure_auto_updates &>/dev/null; then
         assert_true "true" "configure_auto_updates function exists"
     else
         assert_true "false" "configure_auto_updates function should exist"
     fi
     
+    teardown
+}
+
+# Test: noncritical wrapper exists
+test_noncritical_function_exists() {
+    setup
+
+    if type noncritical &>/dev/null; then
+        assert_true "true" "noncritical function exists"
+    else
+        assert_true "false" "noncritical function should exist"
+    fi
+
     teardown
 }

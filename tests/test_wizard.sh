@@ -92,3 +92,236 @@ test_get_config_unknown_key() {
     result=$(get_config "unknown_key")
     assert_equals "" "$result" "get_config should return empty for unknown keys"
 }
+
+# Test: load_config_file rejects missing file
+test_load_config_file_missing() {
+    CONFIG_FILE="/nonexistent/config.ini"
+    if load_config_file 2>/dev/null; then
+        assert_true "false" "load_config_file should fail for missing file"
+    else
+        assert_true "true" "load_config_file correctly rejects missing file"
+    fi
+}
+
+# Test: load_config_file parses valid config
+test_load_config_file_valid() {
+    local tmp_config
+    tmp_config=$(mktemp)
+    cat > "$tmp_config" << 'EOF'
+[system]
+hostname = testhost
+timezone = UTC
+
+[user]
+username = admin
+ssh_key = ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI test@example
+
+[ssh]
+port = 2222
+
+[updates]
+auto_updates = false
+
+[performance]
+enable_zram = false
+enable_swap = true
+EOF
+    CONFIG_FILE="$tmp_config"
+    CONFIG_HOSTNAME=""
+    CONFIG_TIMEZONE=""
+    CONFIG_USERNAME=""
+    CONFIG_SSH_KEY=""
+    CONFIG_SSH_PORT=""
+    CONFIG_ENABLE_AUTO_UPDATES=""
+    CONFIG_ENABLE_ZRAM=""
+    CONFIG_ENABLE_SWAP=""
+
+    if load_config_file 2>/dev/null; then
+        assert_equals "testhost" "$CONFIG_HOSTNAME" "hostname should be parsed"
+        assert_equals "UTC" "$CONFIG_TIMEZONE" "timezone should be parsed"
+        assert_equals "admin" "$CONFIG_USERNAME" "username should be parsed"
+        assert_equals "2222" "$CONFIG_SSH_PORT" "ssh port should be parsed"
+        assert_equals "false" "$CONFIG_ENABLE_AUTO_UPDATES" "auto_updates should be parsed"
+        assert_equals "false" "$CONFIG_ENABLE_ZRAM" "enable_zram should be parsed"
+        assert_equals "true" "$CONFIG_ENABLE_SWAP" "enable_swap should be parsed"
+    else
+        assert_true "false" "load_config_file should succeed with valid config"
+    fi
+
+    rm -f "$tmp_config"
+    CONFIG_FILE=""
+}
+
+# Test: load_config_file rejects invalid hostname
+test_load_config_file_invalid_hostname() {
+    local tmp_config
+    tmp_config=$(mktemp)
+    cat > "$tmp_config" << 'EOF'
+[system]
+hostname = -invalid
+
+[user]
+username = admin
+ssh_key = ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI test@example
+EOF
+    CONFIG_FILE="$tmp_config"
+    CONFIG_HOSTNAME=""
+    CONFIG_USERNAME=""
+    CONFIG_SSH_KEY=""
+
+    if load_config_file 2>/dev/null; then
+        assert_true "false" "load_config_file should reject invalid hostname"
+    else
+        assert_true "true" "load_config_file correctly rejects invalid hostname"
+    fi
+
+    rm -f "$tmp_config"
+    CONFIG_FILE=""
+}
+
+# Test: load_config_file rejects invalid username
+test_load_config_file_invalid_username() {
+    local tmp_config
+    tmp_config=$(mktemp)
+    cat > "$tmp_config" << 'EOF'
+[system]
+hostname = validhost
+
+[user]
+username = 123bad
+ssh_key = ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI test@example
+EOF
+    CONFIG_FILE="$tmp_config"
+    CONFIG_HOSTNAME=""
+    CONFIG_USERNAME=""
+    CONFIG_SSH_KEY=""
+
+    if load_config_file 2>/dev/null; then
+        assert_true "false" "load_config_file should reject invalid username"
+    else
+        assert_true "true" "load_config_file correctly rejects invalid username"
+    fi
+
+    rm -f "$tmp_config"
+    CONFIG_FILE=""
+}
+
+# Test: load_config_file rejects invalid SSH port
+test_load_config_file_invalid_port() {
+    local tmp_config
+    tmp_config=$(mktemp)
+    cat > "$tmp_config" << 'EOF'
+[system]
+hostname = validhost
+
+[user]
+username = admin
+ssh_key = ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI test@example
+
+[ssh]
+port = 99999
+EOF
+    CONFIG_FILE="$tmp_config"
+    CONFIG_HOSTNAME=""
+    CONFIG_USERNAME=""
+    CONFIG_SSH_KEY=""
+    CONFIG_SSH_PORT=""
+
+    if load_config_file 2>/dev/null; then
+        assert_true "false" "load_config_file should reject invalid port"
+    else
+        assert_true "true" "load_config_file correctly rejects invalid port"
+    fi
+
+    rm -f "$tmp_config"
+    CONFIG_FILE=""
+}
+
+# Test: load_config_file handles inline comments
+test_load_config_file_inline_comments() {
+    local tmp_config
+    tmp_config=$(mktemp)
+    cat > "$tmp_config" << 'EOF'
+[system]
+hostname = testhost # this is a comment
+timezone = UTC # UTC timezone
+
+[user]
+username = admin # admin user
+ssh_key = ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI test@example
+
+[ssh]
+port = 2222 # custom port
+EOF
+    CONFIG_FILE="$tmp_config"
+    CONFIG_HOSTNAME=""
+    CONFIG_TIMEZONE=""
+    CONFIG_USERNAME=""
+    CONFIG_SSH_KEY=""
+    CONFIG_SSH_PORT=""
+
+    if load_config_file 2>/dev/null; then
+        assert_equals "testhost" "$CONFIG_HOSTNAME" "hostname should strip inline comment"
+        assert_equals "admin" "$CONFIG_USERNAME" "username should strip inline comment"
+        assert_equals "2222" "$CONFIG_SSH_PORT" "port should strip inline comment"
+    else
+        assert_true "false" "load_config_file should handle inline comments"
+    fi
+
+    rm -f "$tmp_config"
+    CONFIG_FILE=""
+}
+
+# Test: load_config_file warns on unknown sections
+test_load_config_file_unknown_section() {
+    local tmp_config
+    tmp_config=$(mktemp)
+    cat > "$tmp_config" << 'EOF'
+[system]
+hostname = testhost
+
+[user]
+username = admin
+ssh_key = ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI test@example
+
+[unknownsection]
+somekey = someval
+EOF
+    CONFIG_FILE="$tmp_config"
+    CONFIG_HOSTNAME=""
+    CONFIG_USERNAME=""
+    CONFIG_SSH_KEY=""
+
+    local output
+    output=$(load_config_file 2>&1)
+    assert_contains "$output" "Unknown config section" "should warn about unknown section"
+
+    rm -f "$tmp_config"
+    CONFIG_FILE=""
+}
+
+# Test: load_config_file warns on unknown keys
+test_load_config_file_unknown_key() {
+    local tmp_config
+    tmp_config=$(mktemp)
+    cat > "$tmp_config" << 'EOF'
+[system]
+hostname = testhost
+unknown_key = someval
+
+[user]
+username = admin
+ssh_key = ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI test@example
+EOF
+    CONFIG_FILE="$tmp_config"
+    CONFIG_HOSTNAME=""
+    CONFIG_USERNAME=""
+    CONFIG_SSH_KEY=""
+
+    local output
+    output=$(load_config_file 2>&1)
+    assert_contains "$output" "Unknown config key" "should warn about unknown key"
+
+    rm -f "$tmp_config"
+    CONFIG_FILE=""
+}

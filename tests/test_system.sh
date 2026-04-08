@@ -130,3 +130,47 @@ test_get_openssh_deb_filename_includes_arch() {
         assert_true "false" "get_openssh_deb_filename should include architecture, got: $filename"
     fi
 }
+
+# Test: Hostname validation accepts valid hostnames
+test_hostname_validation_valid() {
+    local valid=("myserver" "srv.example.com" "web-01" "a" "server01.local")
+    local all_passed=true
+    for hn in "${valid[@]}"; do
+        if [[ ! "$hn" =~ ^[a-zA-Z0-9]([-a-zA-Z0-9]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([-a-zA-Z0-9]*[a-zA-Z0-9])?)*$ ]]; then
+            echo "  FAIL: Hostname '$hn' should be valid"
+            all_passed=false
+        fi
+    done
+    assert_true "$all_passed" "All valid hostnames should pass validation"
+}
+
+# Test: Hostname validation rejects invalid hostnames
+test_hostname_validation_invalid() {
+    local invalid=("-server" "server-" "my server" "" "srv..example")
+    local all_passed=true
+    for hn in "${invalid[@]}"; do
+        if [[ "$hn" =~ ^[a-zA-Z0-9]([-a-zA-Z0-9]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([-a-zA-Z0-9]*[a-zA-Z0-9])?)*$ ]]; then
+            echo "  FAIL: Hostname '$hn' should be invalid"
+            all_passed=false
+        fi
+    done
+    assert_true "$all_passed" "All invalid hostnames should be rejected"
+}
+
+# Test: OPENSSH_TARGET_VERSION is set
+test_openssh_version_defined() {
+    if [[ -n "${OPENSSH_TARGET_VERSION:-}" ]]; then
+        assert_true "true" "OPENSSH_TARGET_VERSION is defined: $OPENSSH_TARGET_VERSION"
+    else
+        assert_true "false" "OPENSSH_TARGET_VERSION should be defined"
+    fi
+}
+
+# Test: OPENSSH_SHA256 is set and looks like a hash
+test_openssh_sha256_defined() {
+    if [[ "${#OPENSSH_SHA256}" -eq 64 ]]; then
+        assert_true "true" "OPENSSH_SHA256 is a valid 64-char hex string"
+    else
+        assert_true "false" "OPENSSH_SHA256 should be 64 chars, got ${#OPENSSH_SHA256}"
+    fi
+}

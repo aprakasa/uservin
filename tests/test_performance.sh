@@ -79,3 +79,48 @@ test_configure_zram_function_exists() {
     
     teardown
 }
+
+# Test: get_cached_mem_gb returns positive value
+test_get_cached_mem_gb_positive() {
+    setup
+    local mem
+    mem=$(get_cached_mem_gb)
+    assert_true "[[ \$mem -gt 0 ]]" "get_cached_mem_gb should return a positive value"
+    teardown
+}
+
+# Test: get_cached_mem_gb caches result
+test_get_cached_mem_gb_caches() {
+    setup
+    _CACHED_MEM_GB=""
+    local first
+    first=$(get_cached_mem_gb)
+    local second
+    second=$(get_cached_mem_gb)
+    assert_equals "$first" "$second" "get_cached_mem_gb should return same value on second call"
+    teardown
+}
+
+# Test: configure_swap skips when disabled
+test_configure_swap_disabled() {
+    setup
+    CONFIG_ENABLE_SWAP="false"
+    if configure_swap 2>/dev/null; then
+        assert_true "true" "configure_swap should succeed when disabled (skip)"
+    else
+        assert_true "false" "configure_swap should not fail when disabled"
+    fi
+    teardown
+}
+
+# Test: configure_zram skips when disabled
+test_configure_zram_disabled() {
+    setup
+    CONFIG_ENABLE_ZRAM="false"
+    if configure_zram 2>/dev/null; then
+        assert_true "true" "configure_zram should succeed when disabled (skip)"
+    else
+        assert_true "false" "configure_zram should not fail when disabled"
+    fi
+    teardown
+}
