@@ -89,6 +89,24 @@ validate_ssh_key() {
     return 1
 }
 
+# Validate hostname format (simple or FQDN)
+validate_hostname() {
+    local hostname="$1"
+    
+    [[ -z "$hostname" ]] && return 1
+    
+    [[ "$hostname" =~ ^[a-zA-Z0-9]([-a-zA-Z0-9]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([-a-zA-Z0-9]*[a-zA-Z0-9])?)*$ ]]
+}
+
+# Validate username format (lowercase, 1-32 chars, starts with letter)
+validate_username() {
+    local username="$1"
+    
+    [[ -z "$username" ]] && return 1
+    
+    [[ "$username" =~ ^[a-z][-a-z0-9_]*$ ]] && [[ ${#username} -le 32 ]]
+}
+
 # Initialize logging
 init_logging() {
     if [[ -n "$LOG_FILE" ]]; then
@@ -182,7 +200,7 @@ execute_cmd() {
         return 0
     fi
     
-    if bash -c "$cmd"; then
+    if eval "$cmd"; then
         log_verbose "Successfully executed: $description"
         return 0
     else
@@ -480,6 +498,7 @@ show_status() {
 BACKUP_DIR=""                    # Backup directory path
 BACKUP_FILES=()                  # Array of backed up files (format: "original|backup")
 ROLLBACK_NEEDED=false            # Flag for rollback on error
+NONCRITICAL_DEPTH=0              # Depth counter for noncritical() wrapper
 
 # Initialize backup directory with timestamp
 init_backup() {
@@ -797,7 +816,22 @@ cleanup() {
 
 # Register traps
 trap cleanup EXIT
-trap 'set_rollback_needed' ERR
+
+_err_handler() {
+    if [[ $NONCRITICAL_DEPTH -eq 0 ]]; then
+        set_rollback_needed
+    fi
+}
+
+trap '_err_handler' ERR
+
+noncritical() {
+    ((NONCRITICAL_DEPTH++))
+    "$@"
+    local rc=$?
+    ((NONCRITICAL_DEPTH--)) || true
+    return $rc
+}
 
 # =========================================================
 # Library: wizard.sh
@@ -893,7 +927,7 @@ run_wizard() {
     current_hostname=$(hostname 2>/dev/null || echo "ubuntu-server")
     while true; do
         CONFIG_HOSTNAME=$(prompt_input "Enter hostname" "$current_hostname")
-        if [[ -n "$CONFIG_HOSTNAME" && "$CONFIG_HOSTNAME" =~ ^[a-zA-Z0-9]([-a-zA-Z0-9]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([-a-zA-Z0-9]*[a-zA-Z0-9])?)*$ ]]; then
+        if validate_hostname "$CONFIG_HOSTNAME"; then
             break
         fi
         log_error "Invalid hostname. Use alphanumeric characters, hyphens, and dots (for FQDNs)."
@@ -914,8 +948,7 @@ run_wizard() {
     # Step 3: Admin username
     while true; do
         CONFIG_USERNAME=$(prompt_input "Enter admin username" "admin")
-        # Validate username format (lowercase, alphanumeric, underscore, hyphen; start with letter)
-        if [[ "$CONFIG_USERNAME" =~ ^[a-z][-a-z0-9_]*$ && ${#CONFIG_USERNAME} -ge 1 && ${#CONFIG_USERNAME} -le 32 ]]; then
+        if validate_username "$CONFIG_USERNAME"; then
             break
         fi
         log_error "Invalid username. Must start with lowercase letter, use lowercase letters, numbers, hyphens, or underscores only (1-32 chars)."
@@ -1028,15 +1061,22 @@ load_config_file() {
     log_info "Parsing configuration file: $CONFIG_FILE"
     
     # Parse the INI file
+    local known_sections="system user ssh security updates performance"
+    local known_keys="system:hostname system:timezone user:username user:ssh_key ssh:port security:enable_ufw security:enable_fail2ban updates:auto_updates performance:swap_size performance:enable_zram performance:enable_bbr"
     local section=""
     while IFS= read -r line || [[ -n "$line" ]]; do
-        # Skip comments and empty lines
-        [[ "$line" =~ ^[[:space:]]*# ]] && continue
+        # Strip inline comments (space + #) but preserve values containing #
+        line=$(echo "$line" | sed 's/[[:space:]]#[^"]*$//')
+        # Skip empty lines
         [[ "$line" =~ ^[[:space:]]*$ ]] && continue
         
         # Check for section header
         if [[ "$line" =~ ^\[([^]]+)\]$ ]]; then
             section="${BASH_REMATCH[1]}"
+            case "$section" in
+                system|user|ssh|security|updates|performance) ;;
+                *) log_warn "  Unknown config section: [$section] (ignored)" ;;
+            esac
             continue
         fi
         
@@ -1050,7 +1090,8 @@ load_config_file() {
             value=$(echo -n "$value" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
             
             # Map configuration values
-            case "$section:$key" in
+            local full_key="$section:$key"
+            case "$full_key" in
                 "system:hostname")
                     CONFIG_HOSTNAME="$value"
                     log_info "  Hostname: $value"
@@ -1092,6 +1133,9 @@ load_config_file() {
                 "performance:enable_bbr")
                     [[ "$value" == "true" ]] && log_info "  BBR: enabled"
                     ;;
+                *)
+                    log_warn "  Unknown config key: [$section] $key (ignored)"
+                    ;;
             esac
         fi
     done < "$CONFIG_FILE"
@@ -1119,6 +1163,32 @@ load_config_file() {
     [[ -z "$CONFIG_ENABLE_ZRAM" ]] && CONFIG_ENABLE_ZRAM="true"
     [[ -z "$CONFIG_ENABLE_SWAP" ]] && CONFIG_ENABLE_SWAP="true"
     
+    # Validate config values
+    if ! validate_hostname "$CONFIG_HOSTNAME"; then
+        log_error "Invalid hostname in config: $CONFIG_HOSTNAME"
+        return 1
+    fi
+    
+    if ! validate_username "$CONFIG_USERNAME"; then
+        log_error "Invalid username in config: $CONFIG_USERNAME"
+        return 1
+    fi
+    
+    if ! validate_port "$CONFIG_SSH_PORT"; then
+        log_error "Invalid SSH port in config: $CONFIG_SSH_PORT"
+        return 1
+    fi
+    
+    if ! validate_ssh_key "$CONFIG_SSH_KEY"; then
+        log_error "Invalid SSH key in config"
+        return 1
+    fi
+    
+    if [[ -n "$CONFIG_TIMEZONE" ]] && ! timedatectl list-timezones 2>/dev/null | grep -q "^${CONFIG_TIMEZONE}$"; then
+        log_error "Invalid timezone in config: $CONFIG_TIMEZONE"
+        return 1
+    fi
+    
     log_success "Configuration loaded successfully"
     return 0
 }
@@ -1139,6 +1209,7 @@ readonly OPENSSH_SHA256="b343fbcdbff87f15b1986e6e15d6d4fc9a7d36066be6b7fb507087b
 
 # GitHub repo for pre-built OpenSSH .deb packages
 readonly OPENSSH_DEB_REPO="aprakasa/uservin"
+readonly OPENSSH_DEB_SHA256="b5a0e82cae8b3dfc7f134a1e6f4c6ff9e4c00e44a4b87a8ed3e1f6f0a5c7d9e1"
 
 # update_system() - Update system packages
 # Performs full system update including:
@@ -1293,7 +1364,9 @@ compile_openssh_from_source() {
     local openssh_version="$OPENSSH_TARGET_VERSION"
     local tar_url="https://cdn.openbsd.org/pub/OpenBSD/OpenSSH/portable/openssh-${openssh_version}.tar.gz"
     local expected_sha256="$OPENSSH_SHA256"
-    local build_dir="/tmp/openssh-build"
+    local build_dir
+    build_dir=$(mktemp -d "${TMPDIR:-/tmp}/openssh-build.XXXXXX")
+    chmod 700 "$build_dir"
     local src_dir="$build_dir/openssh-${openssh_version}"
 
     log_info "Compiling OpenSSH $openssh_version from source..."
@@ -1319,27 +1392,23 @@ compile_openssh_from_source() {
         return 1
     fi
 
-    if [[ ! -f "$build_dir/openssh.tar.gz" ]]; then
-        log_verbose "Downloading OpenSSH $openssh_version..."
-        if ! execute_cmd "curl -fSL -o $build_dir/openssh.tar.gz $tar_url" "Downloading OpenSSH source"; then
-            log_error "Failed to download OpenSSH source"
-            return 1
-        fi
-
-        log_verbose "Verifying SHA256 checksum..."
-        local actual_sha256
-        actual_sha256=$(sha256sum "$build_dir/openssh.tar.gz" | awk '{print $1}')
-        if [[ "$actual_sha256" != "$expected_sha256" ]]; then
-            log_error "SHA256 checksum mismatch for openssh-${openssh_version}.tar.gz"
-            log_error "Expected: $expected_sha256"
-            log_error "Got:      $actual_sha256"
-            rm -f "$build_dir/openssh.tar.gz"
-            return 1
-        fi
-        log_verbose "SHA256 checksum verified"
-    else
-        log_verbose "Source tarball already downloaded"
+    log_verbose "Downloading OpenSSH $openssh_version..."
+    if ! execute_cmd "curl -fSL -o $build_dir/openssh.tar.gz $tar_url" "Downloading OpenSSH source"; then
+        log_error "Failed to download OpenSSH source"
+        return 1
     fi
+
+    log_verbose "Verifying SHA256 checksum..."
+    local actual_sha256
+    actual_sha256=$(sha256sum "$build_dir/openssh.tar.gz" | awk '{print $1}')
+    if [[ "$actual_sha256" != "$expected_sha256" ]]; then
+        log_error "SHA256 checksum mismatch for openssh-${openssh_version}.tar.gz"
+        log_error "Expected: $expected_sha256"
+        log_error "Got:      $actual_sha256"
+        rm -f "$build_dir/openssh.tar.gz"
+        return 1
+    fi
+    log_verbose "SHA256 checksum verified"
     
     if [[ ! -d "$src_dir" ]]; then
         log_verbose "Extracting source..."
@@ -1455,6 +1524,7 @@ download_openssh_deb() {
     deb_file=$(get_openssh_deb_filename)
     local tmp_deb="/tmp/${deb_file}"
     local extract_dir="/tmp/openssh-deb"
+    local sha256_url="${deb_url}.sha256"
 
     log_info "Trying pre-built OpenSSH package from GitHub Releases..."
     print_header "OpenSSH Pre-built Package"
@@ -1463,6 +1533,26 @@ download_openssh_deb() {
         log_verbose "Pre-built package not available at $deb_url"
         rm -f "$tmp_deb"
         return 1
+    fi
+
+    log_verbose "Verifying .deb SHA256 checksum..."
+    local sha256_file="${tmp_deb}.sha256"
+    if curl -fSL -o "$sha256_file" "$sha256_url" 2>/dev/null && [[ -s "$sha256_file" ]]; then
+        local expected_deb_sha256
+        expected_deb_sha256=$(awk '{print $1}' "$sha256_file")
+        local actual_deb_sha256
+        actual_deb_sha256=$(sha256sum "$tmp_deb" | awk '{print $1}')
+        if [[ "$actual_deb_sha256" != "$expected_deb_sha256" ]]; then
+            log_error "SHA256 checksum mismatch for $deb_file"
+            log_error "Expected: $expected_deb_sha256"
+            log_error "Got:      $actual_deb_sha256"
+            rm -f "$tmp_deb" "$sha256_file"
+            return 1
+        fi
+        log_verbose "SHA256 checksum verified"
+    else
+        log_warn "No SHA256 checksum file available for $deb_file — skipping integrity verification"
+        rm -f "$sha256_file"
     fi
 
     log_info "Extracting OpenSSH binaries from package..."
@@ -1576,10 +1666,7 @@ set_hostname() {
         return 1
     fi
     
-    # Validate hostname - allow simple hostnames and FQDNs
-    # Simple hostname: alphanum + hyphens (e.g., "myserver")
-    # FQDN: hostname + dots + domain (e.g., "srv.stackengineer.dev")
-    if [[ ! "$hostname" =~ ^[a-zA-Z0-9]([-a-zA-Z0-9]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([-a-zA-Z0-9]*[a-zA-Z0-9])?)*$ ]]; then
+    if ! validate_hostname "$hostname"; then
         log_error "Invalid hostname format: $hostname"
         log_error "Hostname must start/end with alphanumeric, can contain hyphens and dots"
         return 1
@@ -1691,13 +1778,15 @@ harden_ssh() {
     
     local kex_algorithms="curve25519-sha256@libssh.org,ecdh-sha2-nistp521,ecdh-sha2-nistp384,ecdh-sha2-nistp256,diffie-hellman-group-exchange-sha256"
     local pq_algorithms=""
-    if ssh -Q kex 2>/dev/null | grep -q "mlkem768x25519-sha256"; then
+    local available_kex
+    available_kex=$(ssh -Q kex 2>/dev/null)
+    if echo "$available_kex" | grep -q "mlkem768x25519-sha256"; then
         pq_algorithms="mlkem768x25519-sha256"
         log_verbose "ML-KEM post-quantum key exchange available"
     else
         log_verbose "ML-KEM not available, using classical key exchange only"
     fi
-    if ssh -Q kex 2>/dev/null | grep -q "sntrup761x25519-sha512"; then
+    if echo "$available_kex" | grep -q "sntrup761x25519-sha512"; then
         pq_algorithms="${pq_algorithms:+$pq_algorithms,}sntrup761x25519-sha512,sntrup761x25519-sha512@openssh.com"
         log_verbose "sntrup761 post-quantum key exchange available"
     fi
@@ -1859,8 +1948,10 @@ configure_ufw() {
         return 1
     fi
     
-    # Reset UFW to defaults
+    # Reset UFW to defaults (save existing rules first)
     log_verbose "Resetting UFW to defaults..."
+    local ufw_backup_rules="/tmp/ufw-rules-backup.$(date +%s).rules"
+    ufw status verbose > "$ufw_backup_rules" 2>/dev/null || true
     echo "y" | ufw reset &>/dev/null
     
     # Set default policies
@@ -2121,8 +2212,7 @@ create_admin_user() {
         return 1
     fi
     
-    # Validate username format
-    if [[ ! "$username" =~ ^[a-z][-a-z0-9_]*$ ]] || [[ ${#username} -lt 1 ]] || [[ ${#username} -gt 32 ]]; then
+    if ! validate_username "$username"; then
         log_error "Invalid username format: $username"
         return 1
     fi
@@ -2179,15 +2269,26 @@ create_admin_user() {
     # Add to sudo and adm groups
     usermod -aG sudo,adm "$username"
     
-    # Display credentials prominently
-    echo -e "\n${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${YELLOW}  USER CREDENTIALS - SAVE THIS!${NC}"
-    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${YELLOW}  Username: $username${NC}"
-    echo -e "${YELLOW}  Password: $password${NC}"
-    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
-    
-    # Save credentials to log file if set
+    if [[ -w /dev/tty ]]; then
+        cat > /dev/tty << CREDEND
+${YELLOW}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  USER CREDENTIALS - SAVE THIS!
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Username: $username
+  Password: $password
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+${NC}
+CREDEND
+    else
+        echo -e "\n${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}" >&2
+        echo -e "${YELLOW}  USER CREDENTIALS - SAVE THIS!${NC}" >&2
+        echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}" >&2
+        echo -e "${YELLOW}  Username: $username${NC}" >&2
+        echo -e "${YELLOW}  Password: $password${NC}" >&2
+        echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n" >&2
+    fi
+
     if [[ -n "$LOG_FILE" ]]; then
         echo "$(date '+%Y-%m-%d %H:%M:%S') USER CREATED: username=$username (password displayed on screen only)" >> "$LOG_FILE"
     fi
@@ -2284,16 +2385,25 @@ setup_ssh_keys() {
 
 SCRIPT_DIR="$(dirname "${BASH_SOURCE[0]}")"
 
+_CACHED_MEM_GB=""
+
+get_cached_mem_gb() {
+    if [[ -z "$_CACHED_MEM_GB" ]]; then
+        _CACHED_MEM_GB=$(get_mem_gb)
+        [[ "$_CACHED_MEM_GB" -eq 0 ]] && _CACHED_MEM_GB=2
+    fi
+    echo "$_CACHED_MEM_GB"
+}
+
 # Optimize system performance
 # Creates sysctl configuration, sets resource limits, and tunes TCP/network settings
 optimize_performance() {
     log_info "Optimizing system performance..."
     
     # Detect system specs
-    local cpu_cores mem_gb disk_type
+    local cpu_cores disk_type
     cpu_cores=$(nproc 2>/dev/null || echo "1")
-    mem_gb=$(get_mem_gb)
-    [[ "$mem_gb" -eq 0 ]] && mem_gb=2
+    mem_gb=$(get_cached_mem_gb)
     
     # Detect SSD by checking /sys/block/*/queue/rotational
     disk_type="HDD"
@@ -2419,8 +2529,7 @@ configure_swap() {
     
     # Detect RAM for swap sizing
     local mem_gb swap_size
-    mem_gb=$(get_mem_gb)
-    [[ "$mem_gb" -eq 0 ]] && mem_gb=2
+    mem_gb=$(get_cached_mem_gb)
     
     # Determine swap size: 2GB default, adjust if RAM < 2GB
     if [[ $mem_gb -lt 2 ]]; then
@@ -2434,18 +2543,28 @@ configure_swap() {
     if [[ "$DRY_RUN" != "true" ]]; then
         # Create swap file using fallocate
         if ! fallocate -l "$swap_size" /swapfile 2>/dev/null; then
-            # Fallback to dd if fallocate fails
-            dd if=/dev/zero of=/swapfile bs=1M count=$((${swap_size%G} * 1024)) 2>/dev/null
+            if ! dd if=/dev/zero of=/swapfile bs=1M count=$((${swap_size%G} * 1024)) 2>/dev/null; then
+                log_error "Failed to create swap file"
+                return 1
+            fi
         fi
         
         # Set proper permissions
         chmod 600 /swapfile
         
         # Initialize swap
-        mkswap /swapfile >/dev/null 2>&1
+        if ! mkswap /swapfile >/dev/null 2>&1; then
+            log_error "Failed to initialize swap file"
+            rm -f /swapfile
+            return 1
+        fi
         
         # Enable swap
-        swapon /swapfile
+        if ! swapon /swapfile; then
+            log_error "Failed to enable swap"
+            rm -f /swapfile
+            return 1
+        fi
         
         # Add to /etc/fstab if not already present
         if ! grep -q "/swapfile" /etc/fstab 2>/dev/null; then
@@ -2481,8 +2600,7 @@ configure_zram() {
     
     # Detect RAM for zram sizing
     local mem_gb zram_size
-    mem_gb=$(get_mem_gb)
-    [[ "$mem_gb" -eq 0 ]] && mem_gb=2
+    mem_gb=$(get_cached_mem_gb)
     
     # Set size to 50% of RAM, minimum 512M
     local zram_mb=$((mem_gb * 1024 / 2))
@@ -2494,7 +2612,10 @@ configure_zram() {
     
     if [[ "$DRY_RUN" != "true" ]]; then
         # Load zram module
-        modprobe zram 2>/dev/null || true
+        if ! modprobe zram 2>/dev/null; then
+            log_error "Failed to load zram kernel module"
+            return 1
+        fi
         
         # Set compression algorithm (zstd preferred, fallback to lzo)
         local comp_algo="lzo"
@@ -2502,19 +2623,30 @@ configure_zram() {
             if grep -q "zstd" /sys/block/zram0/comp_algorithm 2>/dev/null; then
                 comp_algo="zstd"
             fi
-            echo "$comp_algo" > /sys/block/zram0/comp_algorithm 2>/dev/null || true
+            if ! echo "$comp_algo" > /sys/block/zram0/comp_algorithm 2>/dev/null; then
+                log_warn "Failed to set zram compression algorithm, using default"
+            fi
         fi
         
         log_verbose "Using compression algorithm: $comp_algo"
         
         # Set zram size
         if [[ -f /sys/block/zram0/disksize ]]; then
-            echo "${zram_mb}M" > /sys/block/zram0/disksize 2>/dev/null || true
+            if ! echo "${zram_mb}M" > /sys/block/zram0/disksize 2>/dev/null; then
+                log_error "Failed to set zram disk size"
+                return 1
+            fi
         fi
         
         # Initialize swap on zram
-        mkswap /dev/zram0 >/dev/null 2>&1 || true
-        swapon /dev/zram0 >/dev/null 2>&1 || true
+        if ! mkswap /dev/zram0 >/dev/null 2>&1; then
+            log_error "Failed to initialize zram swap"
+            return 1
+        fi
+        if ! swapon /dev/zram0 >/dev/null 2>&1; then
+            log_error "Failed to enable zram swap"
+            return 1
+        fi
         
         # Create systemd service for persistence
         local zram_service="/etc/systemd/system/zram.service"
