@@ -223,15 +223,22 @@ load_config_file() {
     log_info "Parsing configuration file: $CONFIG_FILE"
     
     # Parse the INI file
+    local known_sections="system user ssh security updates performance"
+    local known_keys="system:hostname system:timezone user:username user:ssh_key ssh:port security:enable_ufw security:enable_fail2ban updates:auto_updates performance:swap_size performance:enable_zram performance:enable_bbr"
     local section=""
     while IFS= read -r line || [[ -n "$line" ]]; do
-        # Skip comments and empty lines
-        [[ "$line" =~ ^[[:space:]]*# ]] && continue
+        # Strip inline comments (space + #) but preserve values containing #
+        line=$(echo "$line" | sed 's/[[:space:]]#[^"]*$//')
+        # Skip empty lines
         [[ "$line" =~ ^[[:space:]]*$ ]] && continue
         
         # Check for section header
         if [[ "$line" =~ ^\[([^]]+)\]$ ]]; then
             section="${BASH_REMATCH[1]}"
+            case "$section" in
+                system|user|ssh|security|updates|performance) ;;
+                *) log_warn "  Unknown config section: [$section] (ignored)" ;;
+            esac
             continue
         fi
         
@@ -245,7 +252,8 @@ load_config_file() {
             value=$(echo -n "$value" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
             
             # Map configuration values
-            case "$section:$key" in
+            local full_key="$section:$key"
+            case "$full_key" in
                 "system:hostname")
                     CONFIG_HOSTNAME="$value"
                     log_info "  Hostname: $value"
@@ -287,6 +295,9 @@ load_config_file() {
                 "performance:enable_bbr")
                     [[ "$value" == "true" ]] && log_info "  BBR: enabled"
                     ;;
+                *)
+                    log_warn "  Unknown config key: [$section] $key (ignored)"
+                    ;;
             esac
         fi
     done < "$CONFIG_FILE"
@@ -313,6 +324,32 @@ load_config_file() {
     [[ -z "$CONFIG_ENABLE_AUTO_UPDATES" ]] && CONFIG_ENABLE_AUTO_UPDATES="true"
     [[ -z "$CONFIG_ENABLE_ZRAM" ]] && CONFIG_ENABLE_ZRAM="true"
     [[ -z "$CONFIG_ENABLE_SWAP" ]] && CONFIG_ENABLE_SWAP="true"
+    
+    # Validate config values
+    if ! validate_hostname "$CONFIG_HOSTNAME"; then
+        log_error "Invalid hostname in config: $CONFIG_HOSTNAME"
+        return 1
+    fi
+    
+    if ! validate_username "$CONFIG_USERNAME"; then
+        log_error "Invalid username in config: $CONFIG_USERNAME"
+        return 1
+    fi
+    
+    if ! validate_port "$CONFIG_SSH_PORT"; then
+        log_error "Invalid SSH port in config: $CONFIG_SSH_PORT"
+        return 1
+    fi
+    
+    if ! validate_ssh_key "$CONFIG_SSH_KEY"; then
+        log_error "Invalid SSH key in config"
+        return 1
+    fi
+    
+    if [[ -n "$CONFIG_TIMEZONE" ]] && ! timedatectl list-timezones 2>/dev/null | grep -q "^${CONFIG_TIMEZONE}$"; then
+        log_error "Invalid timezone in config: $CONFIG_TIMEZONE"
+        return 1
+    fi
     
     log_success "Configuration loaded successfully"
     return 0
