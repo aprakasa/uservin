@@ -11,16 +11,25 @@ source "$SCRIPT_DIR/wizard.sh"
 # shellcheck source=/dev/null
 source "$SCRIPT_DIR/safety.sh"
 
+_CACHED_MEM_GB=""
+
+get_cached_mem_gb() {
+    if [[ -z "$_CACHED_MEM_GB" ]]; then
+        _CACHED_MEM_GB=$(get_mem_gb)
+        [[ "$_CACHED_MEM_GB" -eq 0 ]] && _CACHED_MEM_GB=2
+    fi
+    echo "$_CACHED_MEM_GB"
+}
+
 # Optimize system performance
 # Creates sysctl configuration, sets resource limits, and tunes TCP/network settings
 optimize_performance() {
     log_info "Optimizing system performance..."
     
     # Detect system specs
-    local cpu_cores mem_gb disk_type
+    local cpu_cores disk_type
     cpu_cores=$(nproc 2>/dev/null || echo "1")
-    mem_gb=$(get_mem_gb)
-    [[ "$mem_gb" -eq 0 ]] && mem_gb=2
+    mem_gb=$(get_cached_mem_gb)
     
     # Detect SSD by checking /sys/block/*/queue/rotational
     disk_type="HDD"
@@ -146,8 +155,7 @@ configure_swap() {
     
     # Detect RAM for swap sizing
     local mem_gb swap_size
-    mem_gb=$(get_mem_gb)
-    [[ "$mem_gb" -eq 0 ]] && mem_gb=2
+    mem_gb=$(get_cached_mem_gb)
     
     # Determine swap size: 2GB default, adjust if RAM < 2GB
     if [[ $mem_gb -lt 2 ]]; then
@@ -161,18 +169,28 @@ configure_swap() {
     if [[ "$DRY_RUN" != "true" ]]; then
         # Create swap file using fallocate
         if ! fallocate -l "$swap_size" /swapfile 2>/dev/null; then
-            # Fallback to dd if fallocate fails
-            dd if=/dev/zero of=/swapfile bs=1M count=$((${swap_size%G} * 1024)) 2>/dev/null
+            if ! dd if=/dev/zero of=/swapfile bs=1M count=$((${swap_size%G} * 1024)) 2>/dev/null; then
+                log_error "Failed to create swap file"
+                return 1
+            fi
         fi
         
         # Set proper permissions
         chmod 600 /swapfile
         
         # Initialize swap
-        mkswap /swapfile >/dev/null 2>&1
+        if ! mkswap /swapfile >/dev/null 2>&1; then
+            log_error "Failed to initialize swap file"
+            rm -f /swapfile
+            return 1
+        fi
         
         # Enable swap
-        swapon /swapfile
+        if ! swapon /swapfile; then
+            log_error "Failed to enable swap"
+            rm -f /swapfile
+            return 1
+        fi
         
         # Add to /etc/fstab if not already present
         if ! grep -q "/swapfile" /etc/fstab 2>/dev/null; then
@@ -208,8 +226,7 @@ configure_zram() {
     
     # Detect RAM for zram sizing
     local mem_gb zram_size
-    mem_gb=$(get_mem_gb)
-    [[ "$mem_gb" -eq 0 ]] && mem_gb=2
+    mem_gb=$(get_cached_mem_gb)
     
     # Set size to 50% of RAM, minimum 512M
     local zram_mb=$((mem_gb * 1024 / 2))
@@ -221,7 +238,10 @@ configure_zram() {
     
     if [[ "$DRY_RUN" != "true" ]]; then
         # Load zram module
-        modprobe zram 2>/dev/null || true
+        if ! modprobe zram 2>/dev/null; then
+            log_error "Failed to load zram kernel module"
+            return 1
+        fi
         
         # Set compression algorithm (zstd preferred, fallback to lzo)
         local comp_algo="lzo"
@@ -229,19 +249,30 @@ configure_zram() {
             if grep -q "zstd" /sys/block/zram0/comp_algorithm 2>/dev/null; then
                 comp_algo="zstd"
             fi
-            echo "$comp_algo" > /sys/block/zram0/comp_algorithm 2>/dev/null || true
+            if ! echo "$comp_algo" > /sys/block/zram0/comp_algorithm 2>/dev/null; then
+                log_warn "Failed to set zram compression algorithm, using default"
+            fi
         fi
         
         log_verbose "Using compression algorithm: $comp_algo"
         
         # Set zram size
         if [[ -f /sys/block/zram0/disksize ]]; then
-            echo "${zram_mb}M" > /sys/block/zram0/disksize 2>/dev/null || true
+            if ! echo "${zram_mb}M" > /sys/block/zram0/disksize 2>/dev/null; then
+                log_error "Failed to set zram disk size"
+                return 1
+            fi
         fi
         
         # Initialize swap on zram
-        mkswap /dev/zram0 >/dev/null 2>&1 || true
-        swapon /dev/zram0 >/dev/null 2>&1 || true
+        if ! mkswap /dev/zram0 >/dev/null 2>&1; then
+            log_error "Failed to initialize zram swap"
+            return 1
+        fi
+        if ! swapon /dev/zram0 >/dev/null 2>&1; then
+            log_error "Failed to enable zram swap"
+            return 1
+        fi
         
         # Create systemd service for persistence
         local zram_service="/etc/systemd/system/zram.service"
