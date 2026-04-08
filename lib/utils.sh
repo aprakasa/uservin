@@ -167,7 +167,7 @@ execute_cmd() {
         return 0
     fi
     
-    if bash -c "$cmd"; then
+    if eval "$cmd"; then
         log_verbose "Successfully executed: $description"
         return 0
     else

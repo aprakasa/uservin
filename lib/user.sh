@@ -76,15 +76,26 @@ create_admin_user() {
     # Add to sudo and adm groups
     usermod -aG sudo,adm "$username"
     
-    # Display credentials prominently
-    echo -e "\n${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${YELLOW}  USER CREDENTIALS - SAVE THIS!${NC}"
-    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${YELLOW}  Username: $username${NC}"
-    echo -e "${YELLOW}  Password: $password${NC}"
-    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
-    
-    # Save credentials to log file if set
+    if [[ -w /dev/tty ]]; then
+        cat > /dev/tty << CREDEND
+${YELLOW}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  USER CREDENTIALS - SAVE THIS!
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Username: $username
+  Password: $password
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+${NC}
+CREDEND
+    else
+        echo -e "\n${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}" >&2
+        echo -e "${YELLOW}  USER CREDENTIALS - SAVE THIS!${NC}" >&2
+        echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}" >&2
+        echo -e "${YELLOW}  Username: $username${NC}" >&2
+        echo -e "${YELLOW}  Password: $password${NC}" >&2
+        echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n" >&2
+    fi
+
     if [[ -n "$LOG_FILE" ]]; then
         echo "$(date '+%Y-%m-%d %H:%M:%S') USER CREATED: username=$username (password displayed on screen only)" >> "$LOG_FILE"
     fi
