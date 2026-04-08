@@ -19,8 +19,7 @@ create_admin_user() {
         return 1
     fi
     
-    # Validate username format
-    if [[ ! "$username" =~ ^[a-z][-a-z0-9_]*$ ]] || [[ ${#username} -lt 1 ]] || [[ ${#username} -gt 32 ]]; then
+    if ! validate_username "$username"; then
         log_error "Invalid username format: $username"
         return 1
     fi

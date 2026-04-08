@@ -89,7 +89,7 @@ run_wizard() {
     current_hostname=$(hostname 2>/dev/null || echo "ubuntu-server")
     while true; do
         CONFIG_HOSTNAME=$(prompt_input "Enter hostname" "$current_hostname")
-        if [[ -n "$CONFIG_HOSTNAME" && "$CONFIG_HOSTNAME" =~ ^[a-zA-Z0-9]([-a-zA-Z0-9]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([-a-zA-Z0-9]*[a-zA-Z0-9])?)*$ ]]; then
+        if validate_hostname "$CONFIG_HOSTNAME"; then
             break
         fi
         log_error "Invalid hostname. Use alphanumeric characters, hyphens, and dots (for FQDNs)."
@@ -110,8 +110,7 @@ run_wizard() {
     # Step 3: Admin username
     while true; do
         CONFIG_USERNAME=$(prompt_input "Enter admin username" "admin")
-        # Validate username format (lowercase, alphanumeric, underscore, hyphen; start with letter)
-        if [[ "$CONFIG_USERNAME" =~ ^[a-z][-a-z0-9_]*$ && ${#CONFIG_USERNAME} -ge 1 && ${#CONFIG_USERNAME} -le 32 ]]; then
+        if validate_username "$CONFIG_USERNAME"; then
             break
         fi
         log_error "Invalid username. Must start with lowercase letter, use lowercase letters, numbers, hyphens, or underscores only (1-32 chars)."

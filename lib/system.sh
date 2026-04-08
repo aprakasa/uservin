@@ -454,10 +454,7 @@ set_hostname() {
         return 1
     fi
     
-    # Validate hostname - allow simple hostnames and FQDNs
-    # Simple hostname: alphanum + hyphens (e.g., "myserver")
-    # FQDN: hostname + dots + domain (e.g., "srv.stackengineer.dev")
-    if [[ ! "$hostname" =~ ^[a-zA-Z0-9]([-a-zA-Z0-9]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([-a-zA-Z0-9]*[a-zA-Z0-9])?)*$ ]]; then
+    if ! validate_hostname "$hostname"; then
         log_error "Invalid hostname format: $hostname"
         log_error "Hostname must start/end with alphanumeric, can contain hyphens and dots"
         return 1

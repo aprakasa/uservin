@@ -56,6 +56,24 @@ validate_ssh_key() {
     return 1
 }
 
+# Validate hostname format (simple or FQDN)
+validate_hostname() {
+    local hostname="$1"
+    
+    [[ -z "$hostname" ]] && return 1
+    
+    [[ "$hostname" =~ ^[a-zA-Z0-9]([-a-zA-Z0-9]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([-a-zA-Z0-9]*[a-zA-Z0-9])?)*$ ]]
+}
+
+# Validate username format (lowercase, 1-32 chars, starts with letter)
+validate_username() {
+    local username="$1"
+    
+    [[ -z "$username" ]] && return 1
+    
+    [[ "$username" =~ ^[a-z][-a-z0-9_]*$ ]] && [[ ${#username} -le 32 ]]
+}
+
 # Initialize logging
 init_logging() {
     if [[ -n "$LOG_FILE" ]]; then
