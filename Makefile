@@ -18,7 +18,7 @@ clean:
 	@echo "Done. Run 'make build' to regenerate."
 
 # Run all tests
-test:
+test: build
 	@echo "Running tests..."
 	@bash tests/runner.sh
 

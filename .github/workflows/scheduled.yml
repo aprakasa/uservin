@@ -2,18 +2,24 @@ name: Scheduled Tests
 
 on:
   schedule:
-    # Run tests every Sunday at 00:00 UTC
     - cron: '0 0 * * 0'
-  workflow_dispatch:  # Allow manual trigger
+  workflow_dispatch:
 
 jobs:
   test:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        ubuntu-version: ['20.04', '22.04', '24.04', '24.10']
+        ubuntu-version: ['20.04', '22.04', '24.04']
+    container:
+      image: ubuntu:${{ matrix.ubuntu-version }}
     
     steps:
+    - name: Install dependencies
+      run: |
+        apt-get update
+        apt-get install -y git bash
+      
     - name: Checkout code
       uses: actions/checkout@v4
       
@@ -34,7 +40,7 @@ jobs:
       
     - name: Run shellcheck
       run: |
-        shellcheck uservin.sh || true
+        shellcheck uservin.sh
         for file in lib/*.sh; do
-          shellcheck "$file" || true
+          shellcheck "$file"
         done

@@ -29,6 +29,13 @@ trap 'rm -f "$TEMP_FILE"' EXIT
 
 echo "Building uservin.sh..."
 
+# Check for Python 3 dependency
+if ! command -v python3 &>/dev/null; then
+    echo "Error: python3 is required for building but not found in PATH" >&2
+    echo "Install it with: sudo apt-get install python3" >&2
+    exit 1
+fi
+
 # Start with shebang and header
 cat > "$TEMP_FILE" << HEADER
 #!/bin/bash
