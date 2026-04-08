@@ -13,6 +13,7 @@ fi
 BACKUP_DIR=""                    # Backup directory path
 BACKUP_FILES=()                  # Array of backed up files (format: "original|backup")
 ROLLBACK_NEEDED=false            # Flag for rollback on error
+NONCRITICAL_DEPTH=0              # Depth counter for noncritical() wrapper
 
 # Initialize backup directory with timestamp
 init_backup() {
@@ -330,4 +331,19 @@ cleanup() {
 
 # Register traps
 trap cleanup EXIT
-trap 'set_rollback_needed' ERR
+
+_err_handler() {
+    if [[ $NONCRITICAL_DEPTH -eq 0 ]]; then
+        set_rollback_needed
+    fi
+}
+
+trap '_err_handler' ERR
+
+noncritical() {
+    ((NONCRITICAL_DEPTH++))
+    "$@"
+    local rc=$?
+    ((NONCRITICAL_DEPTH--)) || true
+    return $rc
+}
