@@ -2,65 +2,105 @@ name: PR Checks
 
 on:
   pull_request:
-    branches: [ main, master ]
+    branches: [main, master]
     paths:
-      - 'lib/**'
-      - 'tests/**'
-      - 'Makefile'
-      - 'build.sh'
-      - 'uservin.sh'
+      - "lib/**"
+      - "tests/**"
+      - "Makefile"
+      - "build.sh"
+      - "uservin.sh"
+      - ".github/workflows/pr-checks.yml"
+      - ".github/actions/**"
+
+concurrency:
+  group: pr-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: ShellCheck
+        uses: ./.github/actions/shellcheck
+        with:
+          severity: warning
+
   test:
+    name: Test
     runs-on: ubuntu-latest
-    name: Run Tests
-    
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        ubuntu-version: ["20.04", "22.04", "24.04"]
+    container:
+      image: ubuntu:${{ matrix.ubuntu-version }}
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      
-    - name: Run test suite
-      run: |
-        cd tests
-        bash runner.sh
-        
-  shellcheck:
+      - name: Install dependencies
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq git bash make
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run test suite
+        run: |
+          cd tests
+          bash runner.sh
+
+  build:
+    name: Build
     runs-on: ubuntu-latest
-    name: ShellCheck
-    
+    timeout-minutes: 5
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      
-    - name: Install shellcheck
-      run: sudo apt-get update && sudo apt-get install -y shellcheck
-      
-    - name: Run shellcheck
-      run: |
-        shellcheck uservin.sh
-        for file in lib/*.sh; do
-          shellcheck "$file"
-        done
-        echo "Shellcheck passed!"
-        
-  build-test:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build
+        run: make build
+
+      - name: Verify syntax
+        run: bash -n uservin.sh
+
+      - name: Verify version
+        run: bash uservin.sh --version
+
+      - name: Verify help
+        run: bash uservin.sh --help
+
+      - name: Validate consistency
+        run: |
+          VERSION_FILE=$(cat VERSION)
+          SCRIPT_VERSION=$(bash uservin.sh --version 2>&1 | grep -oP '\d+\.\d+\.\d+' | head -1)
+          echo "VERSION file: ${VERSION_FILE}"
+          echo "Script output: ${SCRIPT_VERSION}"
+          if [[ "${VERSION_FILE}" != "${SCRIPT_VERSION}" ]]; then
+            echo "::error::Version mismatch between VERSION file and script output"
+            exit 1
+          fi
+
+  status-check:
+    name: PR Status Check
+    if: always()
     runs-on: ubuntu-latest
-    name: Build Test
-    
+    timeout-minutes: 2
+    needs: [lint, test, build]
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      
-    - name: Test build process
-      run: |
-        make build
-        
-    - name: Verify bundled script
-      run: |
-        bash -n uservin.sh
-        echo "Syntax check passed!"
-        
-    - name: Test bundled script
-      run: |
-        bash uservin.sh --version
-        bash uservin.sh --help
+      - name: Check results
+        run: |
+          if [[ "${{ needs.lint.result }}" == "failure" ]] || \
+             [[ "${{ needs.test.result }}" == "failure" ]] || \
+             [[ "${{ needs.build.result }}" == "failure" ]]; then
+            echo "::error::One or more checks failed"
+            exit 1
+          fi
+          echo "All checks passed"
