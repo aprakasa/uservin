@@ -2,43 +2,86 @@ name: Auto Build
 
 on:
   push:
-    branches: [ main, master ]
-    paths: ['lib/**', 'build.sh', 'Makefile']
+    branches: [main, master]
+    paths: ["lib/**", "build.sh", "Makefile"]
+
+concurrency:
+  group: auto-build-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
 
 jobs:
-  build:
+  verify:
+    name: Verify source changes
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
-      contents: write
-    
+      contents: read
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        token: ${{ secrets.GITHUB_TOKEN }}
-        
-    - name: Setup Git
-      run: |
-        git config --local user.email "action@github.com"
-        git config --local user.name "GitHub Action"
-        
-    - name: Build uservin.sh
-      run: make build
-      
-    - name: Check for changes
-      id: check
-      run: |
-        if git diff --quiet uservin.sh; then
-          echo "changed=false" >> $GITHUB_OUTPUT
-          echo "No changes to uservin.sh"
-        else
-          echo "changed=true" >> $GITHUB_OUTPUT
-          echo "Changes detected in uservin.sh"
-        fi
-        
-    - name: Commit and push
-      if: steps.check.outputs.changed == 'true'
-      run: |
-        git add uservin.sh
-        git commit -m "chore(build): auto-update bundled uservin.sh - triggered by changes to library files"
-        git push
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build
+        run: make build
+
+      - name: Verify syntax
+        run: bash -n uservin.sh
+
+      - name: ShellCheck
+        uses: ./.github/actions/shellcheck
+        with:
+          severity: warning
+
+  commit:
+    name: Commit bundled script
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Generate token
+        id: generate_token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.BOT_APP_ID }}
+          private-key: ${{ secrets.BOT_PRIVATE_KEY }}
+        continue-on-error: true
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ steps.generate_token.outcome == 'success' && steps.generate_token.outputs.token || secrets.GITHUB_TOKEN }}
+
+      - name: Setup Git
+        run: |
+          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+
+      - name: Build uservin.sh
+        run: make build
+
+      - name: Check for changes
+        id: check
+        run: |
+          if git diff --quiet uservin.sh; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No changes to uservin.sh"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Changes detected in uservin.sh"
+          fi
+
+      - name: Generate checksums
+        if: steps.check.outputs.changed == 'true'
+        run: |
+          sha256sum uservin.sh > uservin.sh.sha256
+          sha512sum uservin.sh > uservin.sh.sha512
+
+      - name: Commit and push
+        if: steps.check.outputs.changed == 'true'
+        run: |
+          git add uservin.sh uservin.sh.sha256 uservin.sh.sha512
+          COMMIT_MSG="chore(build): auto-update bundled uservin.sh"$'\n\n'"Triggered by commit ${GITHUB_SHA:0:8}"
+          git commit -m "$COMMIT_MSG"
+          git push
