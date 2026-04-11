@@ -4,98 +4,189 @@ on:
   workflow_dispatch:
     inputs:
       openssh_version:
-        description: 'OpenSSH version (e.g. 9.9p1)'
+        description: "OpenSSH version (e.g. 9.9p1)"
         required: true
-        default: '9.9p1'
+        default: "9.9p1"
       ubuntu_version:
-        description: 'Target Ubuntu version'
+        description: "Target Ubuntu version"
         required: true
-        default: '24.04'
+        default: "24.04"
+      create_release:
+        description: "Create a GitHub release"
+        type: boolean
+        default: true
+
+concurrency:
+  group: build-openssh-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  id-token: write
 
 env:
   OPENSSH_SHA256_9_9p1: "b343fbcdbff87f15b1986e6e15d6d4fc9a7d36066be6b7fb507087ba8f966c02"
 
 jobs:
-  build-deb:
-    runs-on: ubuntu-24.04
+  validate:
+    name: Validate inputs
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
-      contents: write
-
+      contents: read
+    outputs:
+      version: ${{ steps.vars.outputs.version }}
+      numeric_version: ${{ steps.vars.outputs.numeric_version }}
+      ubuntu: ${{ steps.vars.outputs.ubuntu }}
+      sha256: ${{ steps.vars.outputs.sha256 }}
+      arch: ${{ steps.vars.outputs.arch }}
+      deb_name: ${{ steps.vars.outputs.deb_name }}
+      tag: ${{ steps.vars.outputs.tag }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set variables
+      - name: Set and validate variables
         id: vars
         run: |
-          VERSION="${{ github.event.inputs.openssh_version || '9.9p1' }}"
-          UBUNTU="${{ github.event.inputs.ubuntu_version || '24.04' }}"
+          VERSION="${{ inputs.openssh_version || '9.9p1' }}"
+          UBUNTU="${{ inputs.ubuntu_version || '24.04' }}"
           SHA256_VAR="OPENSSH_SHA256_${VERSION//./_}"
           SHA256="${!SHA256_VAR}"
+
           if [[ -z "$SHA256" ]]; then
-            echo "::error::No SHA256 hash configured for OpenSSH $VERSION"
+            echo "::error::No SHA256 hash configured for OpenSSH ${VERSION}"
             echo "Add OPENSSH_SHA256_${VERSION//./_} to the workflow env section"
             exit 1
           fi
+
           NUMERIC_VERSION="${VERSION%%p*}"
           ARCH=$(dpkg-architecture -qDEB_BUILD_ARCH)
           DEB_NAME="openssh-${VERSION}-ubuntu${UBUNTU}-${ARCH}"
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "numeric_version=$NUMERIC_VERSION" >> $GITHUB_OUTPUT
-          echo "ubuntu=$UBUNTU" >> $GITHUB_OUTPUT
-          echo "sha256=$SHA256" >> $GITHUB_OUTPUT
-          echo "arch=$ARCH" >> $GITHUB_OUTPUT
-          echo "deb_name=$DEB_NAME" >> $GITHUB_OUTPUT
-          echo "tag=openssh-${VERSION}-ubuntu${UBUNTU}" >> $GITHUB_OUTPUT
+
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "numeric_version=${NUMERIC_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "ubuntu=${UBUNTU}" >> "$GITHUB_OUTPUT"
+          echo "sha256=${SHA256}" >> "$GITHUB_OUTPUT"
+          echo "arch=${ARCH}" >> "$GITHUB_OUTPUT"
+          echo "deb_name=${DEB_NAME}" >> "$GITHUB_OUTPUT"
+          echo "tag=openssh-${VERSION}-ubuntu${UBUNTU}" >> "$GITHUB_OUTPUT"
+
+          echo "### Build Configuration" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Parameter | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| OpenSSH | \`${VERSION}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Ubuntu | \`${UBUNTU}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Architecture | \`${ARCH}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| SHA256 | \`${SHA256:0:16}...\` |" >> "$GITHUB_STEP_SUMMARY"
+
+  build:
+    name: Build .deb package
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Install build dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq build-essential libssl-dev zlib1g-dev \
-            libpam0g-dev libkrb5-dev libedit-dev libselinux1-dev dpkg-dev
+          sudo apt-get install -y -qq --no-install-recommends \
+            build-essential libssl-dev zlib1g-dev \
+            libpam0g-dev libkrb5-dev libedit-dev \
+            libselinux1-dev dpkg-dev
 
       - name: Download and verify OpenSSH source
         run: |
-          VERSION="${{ steps.vars.outputs.version }}"
-          SHA256="${{ steps.vars.outputs.sha256 }}"
-          curl -fSL -o openssh.tar.gz "https://cdn.openbsd.org/pub/OpenBSD/OpenSSH/portable/openssh-${VERSION}.tar.gz"
+          VERSION="${{ needs.validate.outputs.version }}"
+          SHA256="${{ needs.validate.outputs.sha256 }}"
+          curl -fSL -o openssh.tar.gz \
+            "https://cdn.openbsd.org/pub/OpenBSD/OpenSSH/portable/openssh-${VERSION}.tar.gz"
           ACTUAL=$(sha256sum openssh.tar.gz | awk '{print $1}')
           if [[ "$ACTUAL" != "$SHA256" ]]; then
-            echo "::error::SHA256 mismatch. Expected: $SHA256, Got: $ACTUAL"
+            echo "::error::SHA256 mismatch. Expected: ${SHA256}, Got: ${ACTUAL}"
             exit 1
           fi
-          echo "SHA256 verified: $SHA256"
+          echo "SHA256 verified: ${SHA256}"
 
       - name: Compile OpenSSH
         run: |
-          VERSION="${{ steps.vars.outputs.version }}"
+          VERSION="${{ needs.validate.outputs.version }}"
           tar -xzf openssh.tar.gz
           cd "openssh-${VERSION}"
-          ./configure --prefix=/usr --sysconfdir=/etc/ssh \
-            --with-pam --with-privsep-path=/run/sshd --with-pid-dir=/run \
+          ./configure \
+            --prefix=/usr \
+            --sysconfdir=/etc/ssh \
+            --with-pam \
+            --with-privsep-path=/run/sshd \
+            --with-pid-dir=/run \
             --with-kerberos5=/usr
           make -j"$(nproc)"
 
       - name: Install to staging directory
         run: |
-          VERSION="${{ steps.vars.outputs.version }}"
+          VERSION="${{ needs.validate.outputs.version }}"
           cd "openssh-${VERSION}"
           make DESTDIR="$GITHUB_WORKSPACE/staging" install
 
-      - name: Inspect staged files
+      - name: Generate SBOM
         run: |
-          echo "=== Staged files ==="
-          find "$GITHUB_WORKSPACE/staging" -type f | head -50
-          echo "=== File sizes ==="
-          du -sh "$GITHUB_WORKSPACE/staging/usr/sbin/"* 2>/dev/null || true
-          du -sh "$GITHUB_WORKSPACE/staging/usr/bin/"* 2>/dev/null || true
-          du -sh "$GITHUB_WORKSPACE/staging/usr/libexec/"* 2>/dev/null || true
+          VERSION="${{ needs.validate.outputs.version }}"
+          NUMERIC="${{ needs.validate.outputs.numeric_version }}"
+          UBUNTU="${{ needs.validate.outputs.ubuntu }}"
+          ARCH="${{ needs.validate.outputs.arch }}"
+          DEB_NAME="${{ needs.validate.outputs.deb_name }}"
+          STAGING="$GITHUB_WORKSPACE/staging"
+
+          {
+            echo "### Staged Files"
+            find "$STAGING" -type f | head -50
+            echo ""
+            echo "### Binary Sizes"
+            du -sh "$STAGING/usr/sbin/"* 2>/dev/null || true
+            du -sh "$STAGING/usr/bin/"* 2>/dev/null || true
+            du -sh "$STAGING/usr/libexec/"* 2>/dev/null || true
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          cat > "${DEB_NAME}.sbom.json" << SBOM
+          {
+            "bomFormat": "CycloneDX",
+            "specVersion": "1.5",
+            "version": 1,
+            "metadata": {
+              "component": {
+                "type": "library",
+                "name": "openssh-custom",
+                "version": "${NUMERIC}-1",
+                "purl": "pkg:deb/ubuntu/openssh-custom@${NUMERIC}-1?arch=${ARCH}&distro=ubuntu-${UBUNTU}"
+              },
+              "properties": [
+                {"name": "openssh.version", "value": "${VERSION}"},
+                {"name": "ubuntu.version", "value": "${UBUNTU}"},
+                {"name": "architecture", "value": "${ARCH}"},
+                {"name": "build-host", "value": "$(hostname)"},
+                {"name": "build-date", "value": "$(date -uIseconds)"}
+              ]
+            },
+            "components": [
+              {
+                "type": "library",
+                "name": "openssh",
+                "version": "${VERSION}",
+                "externalReferences": [
+                  {"type": "distribution", "url": "https://cdn.openbsd.org/pub/OpenBSD/OpenSSH/portable/openssh-${VERSION}.tar.gz"}
+                ]
+              }
+            ]
+          }
+          SBOM
 
       - name: Create .deb package
         run: |
-          DEB_NAME="${{ steps.vars.outputs.deb_name }}"
-          VERSION="${{ steps.vars.outputs.numeric_version }}"
-          ARCH="${{ steps.vars.outputs.arch }}"
+          DEB_NAME="${{ needs.validate.outputs.deb_name }}"
+          VERSION="${{ needs.validate.outputs.numeric_version }}"
+          ARCH="${{ needs.validate.outputs.arch }}"
+          UBUNTU="${{ needs.validate.outputs.ubuntu }}"
           STAGING="$GITHUB_WORKSPACE/staging"
           DEB_DIR="$GITHUB_WORKSPACE/${DEB_NAME}"
 
@@ -108,7 +199,7 @@ jobs:
           Maintainer: uservin <aprakasa@users.noreply.github.com>
           Description: OpenSSH ${VERSION} with post-quantum (ML-KEM) support
            Custom build of OpenSSH ${VERSION} compiled with --prefix=/usr
-           for Ubuntu ${{ steps.vars.outputs.ubuntu }}.
+           for Ubuntu ${UBUNTU}.
            Includes ML-KEM (mlkem768x25519-sha256) post-quantum key exchange.
           Depends: libssl3, zlib1g, libpam0g, libkrb5-3, libedit2
           Conflicts: openssh-server, openssh-client
@@ -146,37 +237,98 @@ jobs:
           chmod 755 "$DEB_DIR/DEBIAN/postinst"
 
           cp -a "$STAGING"/* "$DEB_DIR/"
-
           dpkg-deb --build "$DEB_DIR"
-          echo "Built: ${DEB_NAME}.deb"
-          ls -lh "${DEB_NAME}.deb"
 
-      - name: Verify .deb contents
+      - name: Verify .deb package
         run: |
-          DEB_NAME="${{ steps.vars.outputs.deb_name }}"
-          echo "=== .deb contents ==="
-          dpkg-deb --info "${DEB_NAME}.deb"
-          echo ""
-          echo "=== Files ==="
-          dpkg-deb --contents "${DEB_NAME}.deb" | head -30
-          echo ""
-          echo "=== Size ==="
+          DEB_NAME="${{ needs.validate.outputs.deb_name }}"
+          echo "### Package Info" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          dpkg-deb --info "${DEB_NAME}.deb" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          dpkg-deb --contents "${DEB_NAME}.deb" | head -30 >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
           ls -lh "${DEB_NAME}.deb"
 
-      - name: Upload artifact
+      - name: Generate checksums
+        run: |
+          DEB_NAME="${{ needs.validate.outputs.deb_name }}"
+          sha256sum "${DEB_NAME}.deb" > "${DEB_NAME}.deb.sha256"
+          sha512sum "${DEB_NAME}.deb" > "${DEB_NAME}.deb.sha512"
+          echo "### Checksums" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat "${DEB_NAME}.deb.sha256" >> "$GITHUB_STEP_SUMMARY"
+          cat "${DEB_NAME}.deb.sha512" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.vars.outputs.deb_name }}
-          path: ${{ steps.vars.outputs.deb_name }}.deb
+          name: ${{ needs.validate.outputs.deb_name }}
+          path: |
+            ${{ needs.validate.outputs.deb_name }}.deb
+            ${{ needs.validate.outputs.deb_name }}.deb.sha256
+            ${{ needs.validate.outputs.deb_name }}.deb.sha512
+            ${{ needs.validate.outputs.deb_name }}.sbom.json
           retention-days: 90
 
-      - name: Create/Update Release
-        uses: softprops/action-gh-release@v1
+  sign:
+    name: Sign package
+    needs: [validate, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
         with:
-          tag_name: ${{ steps.vars.outputs.tag }}
-          name: "OpenSSH ${{ steps.vars.outputs.version }} for Ubuntu ${{ steps.vars.outputs.ubuntu }}"
+          name: ${{ needs.validate.outputs.deb_name }}
+          path: artifacts
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign checksums
+        run: |
+          cd artifacts
+          DEB_NAME="${{ needs.validate.outputs.deb_name }}"
+          cosign sign-blob --yes \
+            "${DEB_NAME}.deb.sha256" \
+            --output-signature "${DEB_NAME}.deb.sha256.sig" \
+            --output-certificate "${DEB_NAME}.deb.sha256.pem"
+
+      - name: Upload signed artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ needs.validate.outputs.deb_name }}-signed
+          path: artifacts/
+          retention-days: 90
+
+  release:
+    name: Publish release
+    needs: [validate, sign]
+    if: ${{ inputs.create_release }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Download signed artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.validate.outputs.deb_name }}-signed
+          path: artifacts
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.validate.outputs.tag }}
+          name: "OpenSSH ${{ needs.validate.outputs.version }} for Ubuntu ${{ needs.validate.outputs.ubuntu }}"
           body: |
-            ## OpenSSH ${{ steps.vars.outputs.version }} - Ubuntu ${{ steps.vars.outputs.ubuntu }}
+            ## OpenSSH ${{ needs.validate.outputs.version }} - Ubuntu ${{ needs.validate.outputs.ubuntu }}
 
             Pre-built OpenSSH with post-quantum (ML-KEM) key exchange support.
 
@@ -186,8 +338,11 @@ jobs:
 
             ### Installation
             ```bash
-            wget https://github.com/${{ github.repository }}/releases/download/${{ steps.vars.outputs.tag }}/${{ steps.vars.outputs.deb_name }}.deb
-            sudo dpkg -i ${{ steps.vars.outputs.deb_name }}.deb
+            wget https://github.com/${{ github.repository }}/releases/download/${{ needs.validate.outputs.tag }}/${{ needs.validate.outputs.deb_name }}.deb
+            wget https://github.com/${{ github.repository }}/releases/download/${{ needs.validate.outputs.tag }}/${{ needs.validate.outputs.deb_name }}.deb.sha256
+
+            sha256sum -c ${{ needs.validate.outputs.deb_name }}.deb.sha256
+            sudo dpkg -i ${{ needs.validate.outputs.deb_name }}.deb
             ```
 
             ### Verify ML-KEM support
@@ -195,6 +350,11 @@ jobs:
             sshd -T -o "kexalgorithms=+mlkem768x25519-sha256" | grep -i mlkem
             ```
           files: |
-            ${{ steps.vars.outputs.deb_name }}.deb
+            artifacts/${{ needs.validate.outputs.deb_name }}.deb
+            artifacts/${{ needs.validate.outputs.deb_name }}.deb.sha256
+            artifacts/${{ needs.validate.outputs.deb_name }}.deb.sha512
+            artifacts/${{ needs.validate.outputs.deb_name }}.deb.sha256.sig
+            artifacts/${{ needs.validate.outputs.deb_name }}.deb.sha256.pem
+            artifacts/${{ needs.validate.outputs.deb_name }}.sbom.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
