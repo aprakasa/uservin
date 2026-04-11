@@ -1,0 +1,62 @@
+name: "ShellCheck"
+description: "Run ShellCheck on all Bash scripts in the repository"
+inputs:
+  severity:
+    description: "Minimum severity of errors to consider (error, warning, info, style)"
+    required: false
+    default: "warning"
+  fail-on-errors:
+    description: "Whether to fail the workflow on ShellCheck errors"
+    required: false
+    default: "true"
+runs:
+  using: "composite"
+  steps:
+    - name: Install ShellCheck
+      shell: bash
+      run: |
+        if ! command -v shellcheck &>/dev/null; then
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq shellcheck
+        fi
+
+    - name: Detect scripts
+      shell: bash
+      id: detect
+      run: |
+        SCRIPTS=()
+        if [[ -f uservin.sh ]]; then
+          SCRIPTS+=("uservin.sh")
+        fi
+        while IFS= read -r -d '' f; do
+          SCRIPTS+=("$f")
+        done < <(find lib tests -name '*.sh' -print0 2>/dev/null)
+        while IFS= read -r -d '' f; do
+          SCRIPTS+=("$f")
+        done < <(find . -maxdepth 1 -name '*.sh' -print0 2>/dev/null)
+        printf "Found %d scripts\n" "${#SCRIPTS[@]}"
+        printf "%s\n" "${SCRIPTS[@]}" > /tmp/shellcheck-targets.txt
+        cat /tmp/shellcheck-targets.txt
+
+    - name: Run ShellCheck
+      shell: bash
+      run: |
+        FAILED=0
+        while IFS= read -r script; do
+          echo "::group::ShellCheck: ${script}"
+          if ! shellcheck --severity="${{ inputs.severity }}" --format=tty --color=always "$script"; then
+            FAILED=1
+            echo "::error file=${script}::ShellCheck found issues in ${script}"
+          else
+            echo "Passed: ${script}"
+          fi
+          echo "::endgroup::"
+        done < /tmp/shellcheck-targets.txt
+
+        if [[ "${FAILED}" == "1" ]]; then
+          echo "::error::ShellCheck failed for one or more scripts"
+          if [[ "${{ inputs.fail-on-errors }}" == "true" ]]; then
+            exit 1
+          fi
+        fi
+        echo "ShellCheck completed successfully"
