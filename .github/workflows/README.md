@@ -1,70 +1,119 @@
 # GitHub Actions Workflows
 
-This directory contains GitHub Actions workflows for the uservin project.
+Enterprise-grade CI/CD pipeline for the uservin project.
+
+## Architecture
+
+```
+.github/
+├── actions/
+│   └── shellcheck/        # Reusable composite action
+│       └── action.yml
+└── workflows/
+    ├── pr-checks.yml      # PR validation gate
+    ├── auto-build.yml     # Auto-rebuild on merge
+    ├── release.yml        # Signed release pipeline
+    ├── scheduled.yml      # Weekly cross-version tests
+    └── build-openssh.yml  # Manual OpenSSH .deb builder
+```
 
 ## Workflows
 
 ### 1. PR Checks (`pr-checks.yml`)
-**Triggers:** On pull requests to main/master branch
+**Triggers:** Pull requests to `main`/`master`
 
-**What it does:**
-- Runs the full test suite
-- Runs shellcheck for bash linting
-- Builds the bundled script and verifies syntax
+**Jobs:**
+| Job | Purpose | Runner |
+|---|---|---|
+| `lint` | ShellCheck on all scripts | ubuntu-latest |
+| `test` | Test suite across Ubuntu 20.04/22.04/24.04 | Container matrix |
+| `build` | Build + syntax/consistency verification | ubuntu-latest |
+| `status-check` | Aggregated pass/fail gate | ubuntu-latest |
 
-**Why:** Catches issues before merging to main
+**Features:** Concurrency cancellation, path filtering, timeout limits, version consistency check
 
 ### 2. Auto Build (`auto-build.yml`)
-**Triggers:** On push to main/master when lib files change
+**Triggers:** Push to `main`/`master` when library sources change
 
-**What it does:**
-- Automatically builds `uservin.sh` from lib files
-- Commits the bundled file back to the repo
-- Only commits if there are actual changes
+**Jobs:**
+| Job | Purpose |
+|---|---|
+| `verify` | Build + lint gate before committing |
+| `commit` | Rebuild and auto-commit `uservin.sh` with checksums |
 
-**Why:** Ensures the bundled script is always up-to-date with lib changes
+**Features:** Two-stage pipeline (verify then commit), checksum generation, GitHub App token support
 
 ### 3. Release (`release.yml`)
-**Triggers:** When you push a tag starting with 'v' (e.g., `v1.0.0`)
+**Triggers:** Push of version tags (`v*`)
 
-**What it does:**
-- Builds the release bundle
-- Creates a GitHub Release
-- Attaches `uservin.sh` as a release asset
-- Generates installation instructions
+**Jobs:**
+| Job | Purpose |
+|---|---|
+| `verify` | Tag format validation + version consistency |
+| `build` | Build bundle + generate checksums |
+| `sign` | Cosign (Sigstore) artifact signing |
+| `release` | GitHub Release with changelog + signed artifacts |
 
-**Usage:**
-```bash
-git tag v1.0.0
-git push origin v1.0.0
-```
+**Features:** Artifact signing (cosign/sigstore), auto-generated changelog, prerelease detection, SBOM checksums (SHA-256/SHA-512)
 
 ### 4. Scheduled Tests (`scheduled.yml`)
-**Triggers:** Every Sunday at midnight UTC (or manually)
+**Triggers:** Weekly (Mondays 06:00 UTC) + manual dispatch
 
-**What it does:**
-- Runs tests on multiple Ubuntu versions (20.04, 22.04, 24.04)
-- Runs shellcheck
+**Jobs:**
+| Job | Purpose |
+|---|---|
+| `test` | Cross-version Ubuntu testing (20.04/22.04/24.04/24.10) |
+| `lint` | ShellCheck validation |
+| `notify` | Auto-create GitHub issues on failure |
 
-**Why:** Catches issues that might appear due to environment changes
+**Features:** Failure notification via auto-created issues, Ubuntu 24.10 added to matrix
+
+### 5. Build OpenSSH .deb (`build-openssh.yml`)
+**Triggers:** Manual dispatch only
+
+**Jobs:**
+| Job | Purpose |
+|---|---|
+| `validate` | Input validation + SHA-256 verification config |
+| `build` | Compile + package + generate SBOM |
+| `sign` | Cosign (Sigstore) package signing |
+| `release` | Optional GitHub Release publish |
+
+**Features:** CycloneDX SBOM, cosign artifact signing, SHA-256/512 checksums, optional release toggle, job summary reports
+
+## Composite Actions
+
+### ShellCheck (`.github/actions/shellcheck/`)
+Reusable ShellCheck action with configurable severity and error handling. Auto-discovers all `.sh` files in `lib/`, `tests/`, and root.
+
+**Inputs:**
+| Input | Default | Description |
+|---|---|---|
+| `severity` | `warning` | Minimum severity threshold |
+| `fail-on-errors` | `true` | Fail workflow on errors |
 
 ## Setup
 
-No setup required! The workflows use GitHub's built-in tokens:
-- `GITHUB_TOKEN` - Automatically provided by GitHub
+### Required Secrets
+| Secret | Used By | Description |
+|---|---|---|
+| `GITHUB_TOKEN` | All workflows | Auto-provided by GitHub |
+| `BOT_APP_ID` | auto-build | GitHub App ID for signed commits (optional) |
+| `BOT_PRIVATE_KEY` | auto-build | GitHub App private key (optional) |
 
-## Manual Triggers
+### Optional: GitHub App for Auto Build
+For bot-authored commits with proper verification, create a GitHub App with `contents: write` permission and configure `BOT_APP_ID` and `BOT_PRIVATE_KEY` as repository secrets. If not configured, the default `GITHUB_TOKEN` is used as fallback.
 
-You can manually trigger workflows from the GitHub UI:
-1. Go to **Actions** tab
-2. Select the workflow
-3. Click **Run workflow**
+### Labels
+Create these labels for automated issue management:
+- `ci-failure` - For scheduled test failure notifications
+- `automated` - For auto-created issues
 
 ## Badges
-
-Add these to your README.md to show workflow status:
 
 ```markdown
 ![PR Checks](https://github.com/YOUR_USERNAME/uservin/workflows/PR%20Checks/badge.svg)
 ![Auto Build](https://github.com/YOUR_USERNAME/uservin/workflows/Auto%20Build/badge.svg)
+![Release](https://github.com/YOUR_USERNAME/uservin/workflows/Release/badge.svg)
+![Scheduled Tests](https://github.com/YOUR_USERNAME/uservin/workflows/Scheduled%20Tests/badge.svg)
 ```
