@@ -2,55 +2,207 @@ name: Release
 
 on:
   push:
-    tags:
-      - 'v*'
+    tags: ["v*"]
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  id-token: write
+
+env:
+  RELEASE_DIR: release-artifacts
 
 jobs:
-  build-and-release:
+  verify:
+    name: Verify tag
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract and validate version
+        id: version
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+          if [[ "${VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
+            echo "Valid version tag: ${VERSION}"
+          else
+            echo "::error::Invalid version tag format: ${VERSION}. Expected v<major>.<minor>.<patch>[-<pre>]"
+            exit 1
+          fi
+
+          NUMERIC_VERSION="${VERSION#v}"
+          VERSION_FILE=$(cat VERSION)
+          NUMERIC_FILE="${VERSION_FILE}"
+
+          if [[ "${NUMERIC_VERSION}" != "${NUMERIC_FILE}" ]]; then
+            echo "::warning::Tag version (${NUMERIC_VERSION}) does not match VERSION file (${NUMERIC_FILE})"
+          fi
+
+          IS_PRE=false
+          if [[ "${VERSION}" == *"alpha"* ]] || [[ "${VERSION}" == *"beta"* ]] || [[ "${VERSION}" == *"rc"* ]]; then
+            IS_PRE=true
+          fi
+          echo "prerelease=${IS_PRE}" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build release bundle
+        run: make build
+
+      - name: Verify build
+        run: |
+          bash -n uservin.sh
+          bash uservin.sh --version
+
+      - name: Generate checksums
+        run: |
+          mkdir -p "${{ env.RELEASE_DIR }}"
+          cp uservin.sh "${{ env.RELEASE_DIR }}/"
+          cd "${{ env.RELEASE_DIR }}"
+          sha256sum uservin.sh > uservin.sh.sha256
+          sha512sum uservin.sh > uservin.sh.sha512
+          echo "Checksums generated:"
+          cat uservin.sh.sha256
+          cat uservin.sh.sha512
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-artifacts
+          path: ${{ env.RELEASE_DIR }}/
+          retention-days: 1
+
+  sign:
+    name: Sign artifacts
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-artifacts
+          path: ${{ env.RELEASE_DIR }}
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign checksums
+        run: |
+          cd "${{ env.RELEASE_DIR }}"
+          cosign sign-blob --yes uservin.sh.sha256 --output-signature uservin.sh.sha256.sig \
+            --output-certificate uservin.sh.sha256.pem
+          echo "Signed checksums"
+          cat uservin.sh.sha256.sig
+
+      - name: Upload signed artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: signed-artifacts
+          path: ${{ env.RELEASE_DIR }}/
+          retention-days: 1
+
+  release:
+    name: Publish release
+    needs: [verify, sign]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write
-    
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      
-    - name: Get version
-      id: get_version
-      run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-      
-    - name: Build release bundle
-      run: make build
-      
-    - name: Verify build
-      run: |
-        bash -n uservin.sh
-        bash uservin.sh --version
-        
-    - name: Create Release
-      uses: softprops/action-gh-release@v1
-      with:
-        name: Release ${{ steps.get_version.outputs.VERSION }}
-        body: |
-          ## Installation
-          
-          ### Quick install (one-liner):
-          ```bash
-          wget -qO- https://github.com/${{ github.repository }}/releases/download/${{ steps.get_version.outputs.VERSION }}/uservin.sh | sudo bash
-          ```
-          
-          ### Or download and run:
-          ```bash
-          wget https://github.com/${{ github.repository }}/releases/download/${{ steps.get_version.outputs.VERSION }}/uservin.sh
-          chmod +x uservin.sh
-          sudo ./uservin.sh
-          ```
-          
-          ### What's Changed
-          See [CHANGELOG.md](CHANGELOG.md) for full details.
-        files: |
-          uservin.sh
-        draft: false
-        prerelease: ${{ contains(steps.get_version.outputs.VERSION, 'alpha') || contains(steps.get_version.outputs.VERSION, 'beta') || contains(steps.get_version.outputs.VERSION, 'rc') }}
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download signed artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: signed-artifacts
+          path: ${{ env.RELEASE_DIR }}
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          PREVIOUS_TAG=$(git tag --sort=-version:refname | head -2 | tail -1)
+          if [[ -n "${PREVIOUS_TAG}" ]]; then
+            echo "Comparing ${PREVIOUS_TAG}..${{ needs.verify.outputs.version }}"
+            CHANGES=$(git log "${PREVIOUS_TAG}..HEAD" --pretty=format:"- %s (%h)" --no-merges 2>/dev/null || echo "- Initial release")
+          else
+            CHANGES=$(git log --pretty=format:"- %s (%h)" --no-merges | head -50)
+          fi
+
+          echo "previous_tag=${PREVIOUS_TAG}" >> "$GITHUB_OUTPUT"
+          {
+            echo "changes<<EOF"
+            echo "${CHANGES}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Release ${{ needs.verify.outputs.version }}
+          draft: false
+          prerelease: ${{ needs.verify.outputs.prerelease }}
+          generate_release_notes: false
+          body: |
+            ## uservin ${{ needs.verify.outputs.version }}
+
+            Ubuntu Server Initialization Tool
+
+            ### Installation
+
+            **Quick install (one-liner):**
+            ```bash
+            wget -qO- https://github.com/${{ github.repository }}/releases/download/${{ needs.verify.outputs.version }}/uservin.sh | sudo bash
+            ```
+
+            **Download and verify:**
+            ```bash
+            wget https://github.com/${{ github.repository }}/releases/download/${{ needs.verify.outputs.version }}/uservin.sh
+            wget https://github.com/${{ github.repository }}/releases/download/${{ needs.verify.outputs.version }}/uservin.sh.sha256
+            wget https://github.com/${{ github.repository }}/releases/download/${{ needs.verify.outputs.version }}/uservin.sh.sha256.sig
+
+            sha256sum -c uservin.sh.sha256
+            chmod +x uservin.sh
+            sudo ./uservin.sh
+            ```
+
+            ### Changes
+            ${{ steps.changelog.outputs.changes }}
+
+            ### Full Changelog
+            https://github.com/${{ github.repository }}/compare/${{ steps.changelog.outputs.previous_tag }}...${{ needs.verify.outputs.version }}
+          files: |
+            ${{ env.RELEASE_DIR }}/uservin.sh
+            ${{ env.RELEASE_DIR }}/uservin.sh.sha256
+            ${{ env.RELEASE_DIR }}/uservin.sh.sha512
+            ${{ env.RELEASE_DIR }}/uservin.sh.sha256.sig
+            ${{ env.RELEASE_DIR }}/uservin.sh.sha256.pem
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
