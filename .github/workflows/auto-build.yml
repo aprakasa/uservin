@@ -32,7 +32,7 @@ jobs:
       - name: ShellCheck
         uses: ./.github/actions/shellcheck
         with:
-          severity: warning
+          severity: error
 
   commit:
     name: Commit bundled script

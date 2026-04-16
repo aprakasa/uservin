@@ -31,7 +31,7 @@ jobs:
       - name: ShellCheck
         uses: ./.github/actions/shellcheck
         with:
-          severity: warning
+          severity: error
 
   test:
     name: Test
