@@ -1223,7 +1223,18 @@ update_system() {
     
     # Set non-interactive mode for unattended operation
     export DEBIAN_FRONTEND=noninteractive
-    
+
+    log_info "Configuring DNS resolvers..."
+    if [[ ! -f /etc/resolv.conf.bak ]]; then
+        cp /etc/resolv.conf /etc/resolv.conf.bak 2>/dev/null || true
+    fi
+    cat > /etc/resolv.conf << 'DNS'
+nameserver 1.1.1.1
+nameserver 8.8.8.8
+nameserver 2001:4860:4860::8888
+DNS
+    log_success "DNS set to Cloudflare (1.1.1.1) and Google (8.8.8.8)"
+
     log_info "Cleaning package cache..."
     rm -rf /var/lib/apt/lists/* /var/cache/apt/*.bin 2>/dev/null
     apt-get clean -qq 2>/dev/null || true
