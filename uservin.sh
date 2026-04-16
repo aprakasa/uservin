@@ -9,7 +9,7 @@
 set -euo pipefail
 
 # Script version
-readonly SCRIPT_VERSION="1.0.1"
+readonly SCRIPT_VERSION="1.0.2"
 
 # Configuration file path (can be overridden with --config)
 CONFIG_FILE=""
