@@ -86,7 +86,7 @@ jobs:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install build dependencies
         run: |
@@ -263,7 +263,7 @@ jobs:
           echo '```' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ needs.validate.outputs.deb_name }}
           path: |
@@ -283,7 +283,7 @@ jobs:
       id-token: write
     steps:
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: ${{ needs.validate.outputs.deb_name }}
           path: artifacts
@@ -301,7 +301,7 @@ jobs:
             --output-certificate "${DEB_NAME}.deb.sha256.pem"
 
       - name: Upload signed artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ needs.validate.outputs.deb_name }}-signed
           path: artifacts/
@@ -317,13 +317,13 @@ jobs:
       contents: write
     steps:
       - name: Download signed artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: ${{ needs.validate.outputs.deb_name }}-signed
           path: artifacts
 
       - name: Create release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.validate.outputs.tag }}
           name: "OpenSSH ${{ needs.validate.outputs.version }} for Ubuntu ${{ needs.validate.outputs.ubuntu }}"

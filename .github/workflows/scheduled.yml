@@ -30,7 +30,7 @@ jobs:
           apt-get install -y -qq git bash make
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Run test suite
         run: |
@@ -43,7 +43,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: ShellCheck
         uses: ./.github/actions/shellcheck
@@ -60,7 +60,7 @@ jobs:
       issues: write
     steps:
       - name: Create issue for failed scheduled run
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const date = new Date().toISOString().split('T')[0];
