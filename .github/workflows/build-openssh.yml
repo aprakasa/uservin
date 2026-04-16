@@ -289,7 +289,7 @@ jobs:
           path: artifacts
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@v3
+        uses: sigstore/cosign-installer@v4.1.1
 
       - name: Sign checksums
         run: |
