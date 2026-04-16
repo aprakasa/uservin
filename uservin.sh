@@ -1231,9 +1231,12 @@ update_system() {
     fi
     
     log_info "Running apt-get dist-upgrade..."
-    if ! execute_cmd "apt-get dist-upgrade -y -qq" "apt-get dist-upgrade"; then
-        log_error "Failed to upgrade packages"
-        return 1
+    if ! execute_cmd "apt-get dist-upgrade -y -qq -o Dpkg::Options::='--force-confdef' -o Dpkg::Options::='--force-confold'" "apt-get dist-upgrade"; then
+        log_warn "dist-upgrade failed, retrying with --fix-missing..."
+        if ! execute_cmd "apt-get dist-upgrade -y -qq --fix-missing -o Dpkg::Options::='--force-confdef' -o Dpkg::Options::='--force-confold'" "apt-get dist-upgrade (retry)"; then
+            log_error "Failed to upgrade packages"
+            return 1
+        fi
     fi
     
     log_info "Removing unnecessary packages..."
