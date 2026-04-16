@@ -1240,9 +1240,21 @@ DNS
     apt-get clean -qq 2>/dev/null || true
 
     log_info "Running apt-get update..."
-    if ! execute_cmd "apt-get update -qq" "apt-get update"; then
-        log_error "Failed to update package lists"
-        return 1
+    local _update_ok=false
+    for _attempt in 1 2 3; do
+        if execute_cmd "apt-get update -qq -o Acquire::Retries=3" "apt-get update (attempt ${_attempt}/3)"; then
+            _update_ok=true
+            break
+        fi
+        if [[ "$_attempt" -lt 3 ]]; then
+            local _wait=$(( _attempt * 10 ))
+            log_warn "apt-get update attempt ${_attempt} failed, retrying in ${_wait}s..."
+            sleep "$_wait"
+            rm -rf /var/lib/apt/lists/partial 2>/dev/null
+        fi
+    done
+    if [[ "$_update_ok" != "true" ]]; then
+        log_warn "apt-get update had errors, attempting to continue..."
     fi
     
     log_info "Running apt-get dist-upgrade..."
