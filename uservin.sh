@@ -1224,6 +1224,10 @@ update_system() {
     # Set non-interactive mode for unattended operation
     export DEBIAN_FRONTEND=noninteractive
     
+    log_info "Cleaning package cache..."
+    rm -rf /var/lib/apt/lists/* /var/cache/apt/*.bin 2>/dev/null
+    apt-get clean -qq 2>/dev/null || true
+
     log_info "Running apt-get update..."
     if ! execute_cmd "apt-get update -qq" "apt-get update"; then
         log_error "Failed to update package lists"
