@@ -297,8 +297,7 @@ jobs:
           DEB_NAME="${{ needs.validate.outputs.deb_name }}"
           cosign sign-blob --yes \
             "${DEB_NAME}.deb.sha256" \
-            --output-signature "${DEB_NAME}.deb.sha256.sig" \
-            --output-certificate "${DEB_NAME}.deb.sha256.pem"
+            --bundle "${DEB_NAME}.deb.sha256.bundle"
 
       - name: Upload signed artifacts
         uses: actions/upload-artifact@v7
@@ -353,8 +352,7 @@ jobs:
             artifacts/${{ needs.validate.outputs.deb_name }}.deb
             artifacts/${{ needs.validate.outputs.deb_name }}.deb.sha256
             artifacts/${{ needs.validate.outputs.deb_name }}.deb.sha512
-            artifacts/${{ needs.validate.outputs.deb_name }}.deb.sha256.sig
-            artifacts/${{ needs.validate.outputs.deb_name }}.deb.sha256.pem
+            artifacts/${{ needs.validate.outputs.deb_name }}.deb.sha256.bundle
             artifacts/${{ needs.validate.outputs.deb_name }}.sbom.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

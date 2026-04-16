@@ -114,10 +114,10 @@ jobs:
       - name: Sign checksums
         run: |
           cd "${{ env.RELEASE_DIR }}"
-          cosign sign-blob --yes uservin.sh.sha256 --output-signature uservin.sh.sha256.sig \
-            --output-certificate uservin.sh.sha256.pem
+          cosign sign-blob --yes uservin.sh.sha256 \
+            --bundle uservin.sh.sha256.bundle
           echo "Signed checksums"
-          cat uservin.sh.sha256.sig
+          cat uservin.sh.sha256.bundle
 
       - name: Upload signed artifacts
         uses: actions/upload-artifact@v7
@@ -202,7 +202,6 @@ jobs:
             ${{ env.RELEASE_DIR }}/uservin.sh
             ${{ env.RELEASE_DIR }}/uservin.sh.sha256
             ${{ env.RELEASE_DIR }}/uservin.sh.sha512
-            ${{ env.RELEASE_DIR }}/uservin.sh.sha256.sig
-            ${{ env.RELEASE_DIR }}/uservin.sh.sha256.pem
+            ${{ env.RELEASE_DIR }}/uservin.sh.sha256.bundle
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
