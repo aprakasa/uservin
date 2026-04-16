@@ -39,12 +39,22 @@ update_system() {
     fi
     
     log_info "Running apt-get dist-upgrade..."
-    if ! execute_cmd "apt-get dist-upgrade -y -qq -o Dpkg::Options::='--force-confdef' -o Dpkg::Options::='--force-confold'" "apt-get dist-upgrade"; then
-        log_warn "dist-upgrade failed, retrying with --fix-missing..."
-        if ! execute_cmd "apt-get dist-upgrade -y -qq --fix-missing -o Dpkg::Options::='--force-confdef' -o Dpkg::Options::='--force-confold'" "apt-get dist-upgrade (retry)"; then
-            log_error "Failed to upgrade packages"
-            return 1
+    local _dist_ok=false
+    for _attempt in 1 2 3; do
+        if execute_cmd "apt-get dist-upgrade -y -qq --fix-missing -o Dpkg::Options::='--force-confdef' -o Dpkg::Options::='--force-confold'" "apt-get dist-upgrade (attempt ${_attempt}/3)"; then
+            _dist_ok=true
+            break
         fi
+        if [[ "$_attempt" -lt 3 ]]; then
+            local _wait=$(( _attempt * 15 ))
+            log_warn "dist-upgrade attempt ${_attempt} failed, retrying in ${_wait}s..."
+            sleep "$_wait"
+            apt-get update -qq 2>/dev/null || true
+        fi
+    done
+    if [[ "$_dist_ok" != "true" ]]; then
+        log_error "Failed to upgrade packages after 3 attempts"
+        return 1
     fi
     
     log_info "Removing unnecessary packages..."
